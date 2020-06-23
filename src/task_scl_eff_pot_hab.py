@@ -11,52 +11,46 @@ class SCLPolygons(SCLTask):
         "structural_habitat": {
             "ee_type": SCLTask.IMAGECOLLECTION,
             "ee_path": "projects/SCL/v1/Panthera_tigris/geographies/Sumatra/hab/structural_habitat",
-            "maxage": 5,  # years
+            "maxage": 5,  # Latest image in temp collection is 2018, once full collection is available set to 1
         },
         "hii": {
             "ee_type": SCLTask.IMAGECOLLECTION,
             "ee_path": "projects/HII/v1/sumatra_poc/hii",
-            "maxage": 30,
+            "maxage": 1,
         },
         "probability": {
             "ee_type": SCLTask.IMAGECOLLECTION,
             "ee_path": "projects/SCL/v1/Panthera_tigris/geographies/Sumatra/hab/probability",
-            "maxage": 30,
+            "maxage": 5, # Latest image in temp collection is 2017, once full collection is available set to 1
         },
         "historic_range": {
             "ee_type": SCLTask.IMAGE,
             "ee_path": "projects/SCL/v1/Panthera_tigris/source/Inputs_2006/hist",
-            "maxage": 20,
             "static": True
         },
         "extirpated": {
             "ee_type": SCLTask.IMAGE,
             "ee_path": "projects/SCL/v1/Panthera_tigris/source/Inputs_2006/extirp_fin",
-            "maxage": 20,
             "static": True
         },
         "elevation": {
             "ee_type": SCLTask.IMAGE,
             "ee_path": "CGIAR/SRTM90_V4",
-            "maxage": 30,
             "static": True
         },
         "water": {
             "ee_type": SCLTask.IMAGE,
             "ee_path": "projects/HII/v1/source/phys/watermask_jrc70_cciocean",
-            "maxage": 30,
             "static": True
         },
         "ecoregion_country": {
             "ee_type": SCLTask.IMAGE,
             "ee_path": "projects/SCL/v1/Panthera_tigris/source/Inputs_2006/eco_cntry",
-            "maxage": 20,
             "static": True
         },
         "density": {
             "ee_type": SCLTask.IMAGE,
             "ee_path": "projects/SCL/v1/Panthera_tigris/source/Inputs_2006/density",
-            "maxage": 20,
             "static": True
         },
     }
@@ -119,18 +113,11 @@ class SCLPolygons(SCLTask):
             excluded_habitat
         ).rename(["eff_pot_hab", "excl_hab"])
 
-        # probability_calc = self.elevation.expression(
-        #     "1 - (2.71828 ** (-(2.71828 ** (- 0.069 - 0.044 * ((dem - 639) / 592) - 0.12 * ((hii - 7.72) / 5.47)))))",
-        #     {"dem": self.elevation, "hii": self.hii},
-        # )
-
         high_probability = self.probability.gte(self.thresholds["probability"]).multiply(
             2
         )
 
-        low_probability = self.probability.lt(self.thresholds["probability"]).multiply(
-            1
-        )
+        low_probability = self.probability.lt(self.thresholds["probability"])
 
         probability_calc = high_probability.add(low_probability).selfMask()
 
@@ -144,10 +131,10 @@ class SCLPolygons(SCLTask):
 
         hii_ecoregion = self.ecoregion_country.add(hii_sum)
 
-        minPatchSize = self.density.remap(
+        min_patch_size = self.density.remap(
             self.remap_lists["density"], self.remap_lists["min_patch_size"]
         ).updateMask(hii_ecoregion)
-        minStpStnSize = self.density.remap(
+        min_stepping_stone_size = self.density.remap(
             self.remap_lists["density"], self.remap_lists["min_stepping_stone_size"]
         ).updateMask(hii_ecoregion)
 
@@ -156,8 +143,8 @@ class SCLPolygons(SCLTask):
                 probability_calc,
                 hii_sum,
                 ee.Image.pixelArea().multiply(0.000001),
-                minPatchSize,
-                minStpStnSize,
+                min_patch_size,
+                min_stepping_stone_size,
             ]
         ).reproject(crs="EPSG:4326", scale=self.scale)
 
@@ -166,17 +153,24 @@ class SCLPolygons(SCLTask):
             .combine(ee.Reducer.mode().unweighted(), "hii_")
             .combine(ee.Reducer.sum().unweighted(), "area_")
             .combine(ee.Reducer.mode().unweighted(), "patch_")
-            .combine(ee.Reducer.mode().unweighted(), "stpStn_")
+            .combine(ee.Reducer.mode().unweighted(), "stp_stn_")
         )
         hii_grp_poly = hii_grp.reduceToVectors(
             reducer=polygonReducer,
             geometry=ee.Geometry.MultiPolygon(self.aoi).bounds(),
             crs=self.crs,
             scale=self.scale,
-            maxPixels=1e13,
+            maxPixels=self.ee_max_pixels,
             geometryInNativeProjection=True,
         ).select(
-            ["area_sum", "hii_mode", "label", "max", "patch_mode", "stpStn_mode"],
+            [
+                "area_sum",
+                "hii_mode",
+                "label",
+                "mode",
+                "patch_mode",
+                "stp_stn_mode"
+            ],
             [
                 "patch_area",
                 "hii",
@@ -186,17 +180,16 @@ class SCLPolygons(SCLTask):
                 "min_stp_stn_area",
             ],
         )
+
         scl_eff_pot_hab = "{}/geographies/Sumatra/scl_poly/{}/scl_eff_pot_hab".format(
             self.species, self.taskdate
         )
+
         self.export_fc_ee(hii_grp_poly, scl_eff_pot_hab)
 
     def check_inputs(self):
         super().check_inputs()
 
-
-# -d 2016-01-01
-# or --taskdate 2016-01-01
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--taskdate", default=datetime.now(timezone.utc).date())
