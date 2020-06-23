@@ -11,7 +11,7 @@ class SCLPolygons(SCLTask):
         "structural_habitat": {
             "ee_type": SCLTask.IMAGECOLLECTION,
             "ee_path": "projects/SCL/v1/Panthera_tigris/geographies/Sumatra/hab/structural_habitat",
-            "maxage": 5,  # Latest image in temp collection is 2018, once full collection is available set to 1
+            "maxage": 1,
         },
         "hii": {
             "ee_type": SCLTask.IMAGECOLLECTION,
@@ -21,7 +21,7 @@ class SCLPolygons(SCLTask):
         "probability": {
             "ee_type": SCLTask.IMAGECOLLECTION,
             "ee_path": "projects/SCL/v1/Panthera_tigris/geographies/Sumatra/hab/probability",
-            "maxage": 5, # Latest image in temp collection is 2017, once full collection is available set to 1
+            "maxage": 1, 
         },
         "historic_range": {
             "ee_type": SCLTask.IMAGE,
