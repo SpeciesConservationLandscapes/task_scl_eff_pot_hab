@@ -3,6 +3,7 @@ import ee
 from datetime import datetime, timezone
 from task_base import SCLTask
 
+
 class SCLPolygons(SCLTask):
     ee_rootdir = "projects/SCL/v1"
     scale = 300
@@ -25,37 +26,37 @@ class SCLPolygons(SCLTask):
         "historic_range": {
             "ee_type": SCLTask.IMAGE,
             "ee_path": "projects/SCL/v1/Panthera_tigris/source/Inputs_2006/hist",
-            "static": True
+            "static": True,
         },
         "extirpated": {
             "ee_type": SCLTask.IMAGE,
             "ee_path": "projects/SCL/v1/Panthera_tigris/source/Inputs_2006/extirp_fin",
-            "static": True
+            "static": True,
         },
         "elevation": {
             "ee_type": SCLTask.IMAGE,
             "ee_path": "CGIAR/SRTM90_V4",
-            "static": True
+            "static": True,
         },
         "water": {
             "ee_type": SCLTask.IMAGE,
             "ee_path": "projects/HII/v1/source/phys/watermask_jrc70_cciocean",
-            "static": True
+            "static": True,
         },
         "ecoregion_country": {
             "ee_type": SCLTask.IMAGE,
             "ee_path": "projects/SCL/v1/Panthera_tigris/source/Inputs_2006/eco_cntry",
-            "static": True
+            "static": True,
         },
         "ecoregions": {
             "ee_type": SCLTask.FEATURECOLLECTION,
             "ee_path": "RESOLVE/ECOREGIONS/2017",
-            "static": True
+            "static": True,
         },
         "density": {
             "ee_type": SCLTask.FEATURECOLLECTION,
             "ee_path": "projects/SCL/v1/Panthera_tigris/source/density/tiger_obs_density",
-            "static": True
+            "static": True,
         },
     }
     thresholds = {
@@ -65,17 +66,23 @@ class SCLPolygons(SCLTask):
         "hii": 6,
         "probability": 1,
     }
+    density_values = {
+        "n_core_animals": 5,
+        "core_to_step_ratio": 0.1,
+        "core_size_limits": {"min": 30, "max": 625},
+        "step_size_limits": {"min": 3, "max": 63},
+    }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.structural_habitat, _ = self.get_most_recent_image(
-             ee.ImageCollection(self.inputs["structural_habitat"]["ee_path"])
+            ee.ImageCollection(self.inputs["structural_habitat"]["ee_path"])
         )
         self.probability, _ = self.get_most_recent_image(
-             ee.ImageCollection(self.inputs["probability"]["ee_path"])
+            ee.ImageCollection(self.inputs["probability"]["ee_path"])
         )
         self.hii, _ = self.get_most_recent_image(
-             ee.ImageCollection(self.inputs["hii"]["ee_path"])
+            ee.ImageCollection(self.inputs["hii"]["ee_path"])
         )
         self.historic_range = ee.Image(self.inputs["historic_range"]["ee_path"])
         self.extirpated = ee.Image(self.inputs["extirpated"]["ee_path"])
@@ -113,9 +120,9 @@ class SCLPolygons(SCLTask):
             excluded_habitat
         ).rename(["eff_pot_hab", "excl_hab"])
 
-        high_probability = self.probability.gte(self.thresholds["probability"]).multiply(
-            2
-        )
+        high_probability = self.probability.gte(
+            self.thresholds["probability"]
+        ).multiply(2)
 
         low_probability = self.probability.lt(self.thresholds["probability"])
 
@@ -126,39 +133,63 @@ class SCLPolygons(SCLTask):
             .unmask(0)
             .add(effective_potential_habitat.select(1).unmask(0).multiply(2))
             .selfMask()
-            .remap([1, 2], [2, 3])
         )
 
         hii_ecoregion = self.ecoregion_country.add(hii_sum)
 
         def density_to_patch_size(ft):
-            med_density_eco = ee.Number(ft.get('MED_DENSITY_ECO'))
-            med_density_biome = ee.Number(ft.get('MED_DENSITY_ECO'))
-            med_density_eco_biome = ee.Number(ft.get('MED_DENSITY_ECO'))
-            density_val = ee.Algorithms.If(med_density_eco.gt(0),
+            med_density_eco = ee.Number(ft.get("MED_DENSITY_ECO"))
+            med_density_biome = ee.Number(ft.get("MED_DENSITY_BIOME"))
+            med_density_eco_biome = ee.Number(ft.get("MED_DENSITY_ECO_BIOME"))
+            density_val = ee.Algorithms.If(
+                med_density_eco.gt(0),
                 med_density_eco,
-                ee.Algorithms.If(med_density_biome.gt(0),
+                ee.Algorithms.If(
+                    med_density_biome.gt(0),
                     med_density_biome,
-                    ee.Algorithms.If(med_density_eco_biome.gt(0),
-                        med_density_eco_biome,
-                        1)))
-            min_core_size = ee.Number(500).divide(density_val).int()
-            return ee.Feature(None, {'ECO_ID': ft.get('ECO_ID'), 'min_core_size': min_core_size})
+                    ee.Algorithms.If(
+                        med_density_eco_biome.gt(0), med_density_eco_biome, 1
+                    ),
+                ),
+            )
+            min_core_size = (
+                ee.Number(self.density_values["n_core_animals"])
+                .divide(density_val)
+                .multiply(100)
+                .int()
+            )
+            return ee.Feature(
+                None, {"ECO_ID": ft.get("ECO_ID"), "min_core_size": min_core_size}
+            )
 
         density = self.density.map(density_to_patch_size)
 
         ecoregion_image = self.ecoregions.reduceToImage(
-            properties=['ECO_ID'],
-            reducer=ee.Reducer.mode()
+            properties=["ECO_ID"], reducer=ee.Reducer.mode()
         )
 
-        ecoregion_id = density.aggregate_array('ECO_ID')
-        core_size = density.aggregate_array('min_core_size')
+        ecoregion_id = density.aggregate_array("ECO_ID")
+        core_size = density.aggregate_array("min_core_size")
 
-        min_patch_size = ecoregion_image.remap(
-            ecoregion_id, core_size).int().clamp(30, 625).updateMask(hii_ecoregion)
-        min_stepping_stone_size = min_patch_size.divide(10).int().updateMask(hii_ecoregion)
+        min_patch_size = (
+            ecoregion_image.remap(ecoregion_id, core_size)
+            .int()
+            .clamp(
+                self.density_values["core_size_limits"]["min"],
+                self.density_values["core_size_limits"]["max"],
+            )
+            .updateMask(hii_ecoregion)
+        )
 
+        min_stepping_stone_size = (
+            min_patch_size.multiply(self.density_values["core_to_step_ratio"])
+            .int()
+            .clamp(
+                self.density_values["step_size_limits"]["min"],
+                self.density_values["step_size_limits"]["max"],
+            )
+            .updateMask(hii_ecoregion)
+        )
         hii_grp = hii_ecoregion.addBands(
             [
                 probability_calc,
@@ -170,7 +201,7 @@ class SCLPolygons(SCLTask):
         ).reproject(crs="EPSG:4326", scale=self.scale)
 
         polygonReducer = (
-            ee.Reducer.mode()
+            ee.Reducer.mode().unweighted()
             .combine(ee.Reducer.mode().unweighted(), "hii_")
             .combine(ee.Reducer.sum().unweighted(), "area_")
             .combine(ee.Reducer.mode().unweighted(), "patch_")
@@ -184,14 +215,7 @@ class SCLPolygons(SCLTask):
             maxPixels=self.ee_max_pixels,
             geometryInNativeProjection=True,
         ).select(
-            [
-                "area_sum",
-                "hii_mode",
-                "label",
-                "mode",
-                "patch_mode",
-                "stp_stn_mode"
-            ],
+            ["area_sum", "hii_mode", "label", "mode", "patch_mode", "stp_stn_mode"],
             [
                 "patch_area",
                 "hii",
@@ -202,7 +226,7 @@ class SCLPolygons(SCLTask):
             ],
         )
 
-        scl_eff_pot_hab = "{}/geographies/Sumatra/scl_poly/{}/scl_eff_pot_hab_test".format(
+        scl_eff_pot_hab = "{}/geographies/Sumatra/scl_poly/{}/scl_eff_pot_hab".format(
             self.species, self.taskdate
         )
 
@@ -210,6 +234,7 @@ class SCLPolygons(SCLTask):
 
     def check_inputs(self):
         super().check_inputs()
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
