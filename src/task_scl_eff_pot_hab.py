@@ -55,11 +55,14 @@ class SCLPolygons(SCLTask):
         },
     }
     thresholds = {
-        "str_lc": 4,
+        "structural_habitat": 4,
         "elev": 3350,
         "patch_size": 5,  # sq km
+        "upper_limit_core_size": 625,  # sq km or number of pixels at 1000m scale
+        "lower_limit_fragment_size": 3,  # sq km or number of pixels at 1000m scale
         "hii": 12,
         "probability": 1,
+        "connectity_distance": 2,
     }
     density_values = {
         "n_core_animals": 5,
@@ -121,7 +124,9 @@ class SCLPolygons(SCLTask):
             return dialated_image.lte(distance).selfMask()
 
         elev_mask = self.elevation.lt(self.thresholds["elev"]).selfMask()
-        str_hab_mask = self.structural_habitat.gt(self.thresholds["str_lc"]).selfMask()
+        str_hab_mask = self.structural_habitat.gt(
+            self.thresholds["structural_habitat"]
+        ).selfMask()
         current_range = self.historic_range.updateMask(self.extirpated).selfMask()
         low_hii_mask = self.hii.lte(self.thresholds["hii"]).selfMask()
         str_hab = (
@@ -131,12 +136,14 @@ class SCLPolygons(SCLTask):
             .updateMask(current_range)
         )
 
-        connected_potential_habitat = str_hab.connectedPixelCount(625, True).reproject(
-            crs="EPSG:4326", scale=self.scale
-        )
+        connected_potential_habitat = str_hab.connectedPixelCount(
+            self.density_val["core_size_limits"]["max"], True
+        ).reproject(crs="EPSG:4326", scale=self.scale)
 
         potential_habitat = connected_potential_habitat.updateMask(
-            connected_potential_habitat.gte(3)
+            connected_potential_habitat.gte(
+                self.density_values["step_size_limits"]["min"]
+            )
         ).selfMask()
 
         density = self.density.map(density_to_patch_size)
@@ -184,14 +191,14 @@ class SCLPolygons(SCLTask):
         )
 
         potential_core = (
-            dilate(potential_core, 2)
+            dilate(potential_core, self.thresholds["connectity_distance"])
             .reproject(crs="EPSG:4326", scale=self.scale)
             .multiply(3)
             .unmask(0)
             .updateMask(self.water)
         )
         potential_stepping_stone = (
-            dilate(potential_stepping_stone, 2)
+            dilate(potential_stepping_stone, self.thresholds["connectity_distance"])
             .reproject(crs="EPSG:4326", scale=self.scale)
             .unmask(0)
             .updateMask(self.water)
@@ -224,7 +231,7 @@ class SCLPolygons(SCLTask):
                 geometry=self.extent,
                 scale=self.scale,
                 crs="EPSG:4326",
-                maxPixels=1e10,
+                maxPixels=self.ee_max_pixels,
             )
         )
 
