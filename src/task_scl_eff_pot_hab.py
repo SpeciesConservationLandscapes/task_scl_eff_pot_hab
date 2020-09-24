@@ -58,17 +58,15 @@ class SCLPolygons(SCLTask):
         "structural_habitat": 4,
         "elev": 3350,
         "patch_size": 5,  # sq km
-        "upper_limit_core_size": 625,  # sq km or number of pixels at 1000m scale
-        "lower_limit_fragment_size": 3,  # sq km or number of pixels at 1000m scale
         "hii": 12,
         "probability": 1,
-        "connectity_distance": 2,
+        "connectity_distance": 2,  # km (1/2 of actual dispersal distance)
     }
     density_values = {
         "n_core_animals": 5,
         "core_to_step_ratio": 0.1,
-        "core_size_limits": {"min": 30, "max": 625},
-        "step_size_limits": {"min": 3, "max": 63},
+        "core_size_limits": {"min": 30, "max": 625},  # size min/max in sqkm
+        "step_size_limits": {"min": 3, "max": 63},  # size min/max in sqkm
     }
 
     def scenario_probability(self):
@@ -94,6 +92,17 @@ class SCLPolygons(SCLTask):
         self.set_aoi_from_ee(self.inputs["probability"]["ee_path"])
 
     def calc(self):
+        def dispersal_to_pixels(distance):
+            scale_km = self.scale / 1000
+            pixel_distance = int(round(distance / scale_km))
+            return pixel_distance
+
+        def area_to_pixels(area):
+            scale_km = self.scale / 1000
+            resolution_km = scale_km ** 2
+            n_pixels = ee.Number(area).divide(resolution_km)
+            return n_pixels
+
         def density_to_patch_size(ft):
             med_density_eco = ee.Number(ft.get("MED_DENSITY_ECO"))
             med_density_biome = ee.Number(ft.get("MED_DENSITY_BIOME"))
@@ -115,20 +124,27 @@ class SCLPolygons(SCLTask):
                 .multiply(100)
                 .int()
             )
+            min_core_size_pixels = area_to_pixels(min_core_size)
             return ee.Feature(
-                None, {"ECO_ID": ft.get("ECO_ID"), "min_core_size": min_core_size}
+                None,
+                {"ECO_ID": ft.get("ECO_ID"), "min_core_size": min_core_size_pixels},
             )
 
         def dilate(image, distance):
-            dialated_image = image.fastDistanceTransform(distance).sqrt()
-            return dialated_image.lte(distance).selfMask()
+            pixel_distance = dispersal_to_pixels(distance)
+            dialated_image = image.fastDistanceTransform(pixel_distance).sqrt()
+            return dialated_image.lte(pixel_distance).selfMask()
 
         elev_mask = self.elevation.lt(self.thresholds["elev"]).selfMask()
+
         str_hab_mask = self.structural_habitat.gt(
             self.thresholds["structural_habitat"]
         ).selfMask()
+
         current_range = self.historic_range.updateMask(self.extirpated).selfMask()
+
         low_hii_mask = self.hii.lte(self.thresholds["hii"]).selfMask()
+
         str_hab = (
             str_hab_mask.updateMask(elev_mask)
             .updateMask(low_hii_mask)
@@ -136,14 +152,20 @@ class SCLPolygons(SCLTask):
             .updateMask(current_range)
         )
 
+        max_core_pixels = area_to_pixels(self.density_values["core_size_limits"]["max"])
+
+        min_core_pixels = area_to_pixels(self.density_values["core_size_limits"]["min"])
+
+        max_step_pixels = area_to_pixels(self.density_values["step_size_limits"]["max"])
+
+        min_step_pixels = area_to_pixels(self.density_values["step_size_limits"]["min"])
+
         connected_potential_habitat = str_hab.connectedPixelCount(
-            self.density_val["core_size_limits"]["max"], True
+            max_core_pixels, True
         ).reproject(crs="EPSG:4326", scale=self.scale)
 
         potential_habitat = connected_potential_habitat.updateMask(
-            connected_potential_habitat.gte(
-                self.density_values["step_size_limits"]["min"]
-            )
+            connected_potential_habitat.gte(min_step_pixels)
         ).selfMask()
 
         density = self.density.map(density_to_patch_size)
@@ -153,25 +175,20 @@ class SCLPolygons(SCLTask):
         )
 
         ecoregion_id = density.aggregate_array("ECO_ID")
+
         core_size = density.aggregate_array("min_core_size")
 
         min_patch_size = (
             ecoregion_image.remap(ecoregion_id, core_size)
             .int()
-            .clamp(
-                self.density_values["core_size_limits"]["min"],
-                self.density_values["core_size_limits"]["max"],
-            )
+            .clamp(min_core_pixels, max_core_pixels,)
             .updateMask(potential_habitat)
         )
 
         min_stepping_stone_size = (
             min_patch_size.multiply(self.density_values["core_to_step_ratio"])
             .int()
-            .clamp(
-                self.density_values["step_size_limits"]["min"],
-                self.density_values["step_size_limits"]["max"],
-            )
+            .clamp(min_step_pixels, max_step_pixels,)
             .updateMask(potential_habitat)
         )
 
