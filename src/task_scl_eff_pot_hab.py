@@ -22,7 +22,7 @@ class SCLPolygons(SCLTask):
         },
         "probability": {
             "ee_type": SCLTask.IMAGECOLLECTION,
-            "ee_path": "projects/SCL/v1/Panthera_tigris/canonical/probability",
+            "ee_path": "scenario_probability",
             # TODO: change static to maxage once collection is produced
             "static": True,
         },
@@ -55,34 +55,16 @@ class SCLPolygons(SCLTask):
         "hii": 18,  # TODO: HII will eventually be spatially dynamic by zone or country
         "probability": 1,  # TODO: probability threshold may change based on final probability format
         "connectity_distance": 2,  # km (1/2 of actual dispersal distance)
+        "landscape_size": 3,
+        "landscape_probability": 1,
+        "landscape_survey_effort": 1,
     }
+
     density_values = {
         "n_core_animals": 5,
         "core_to_step_ratio": 0.1,
         "core_size_limits": {"min": 30, "max": 625},  # size min/max in sqkm
         "step_size_limits": {"min": 3, "max": 63},  # size min/max in sqkm
-    }
-    scl_poly_filters = {
-        "scl_species": {
-            "size": 3,
-            "probability": 1,
-            "effort": 1,
-        },  # large, high probabiliyt, has survey effor
-        "scl_restoration": {
-            "size": 3,
-            "probability": 0,
-            "effort": 1,
-        },  # large, any probability level, has survey effort
-        "scl_survey": {
-            "size": 3,
-            "probability": 1,
-            "effort": 0,
-        },  # large, high probability, has no survey effort
-        "scl_fragment": {
-            "size": 2,
-            "probability": 1,
-            "effort": 0,
-        },  # small, high probability, any survey effort
     }
 
     def scenario_probability(self):
@@ -103,104 +85,123 @@ class SCLPolygons(SCLTask):
         self.ecoregions = ee.FeatureCollection(self.inputs["ecoregions"]["ee_path"])
         self.density = ee.FeatureCollection(self.inputs["density"]["ee_path"])
         self.water = ee.Image(self.inputs["water"]["ee_path"])
-        self.set_aoi_from_ee(self.inputs["probability"]["ee_path"])
+        self.scl_poly_filters = {
+            "scl_species": ee.Filter.And(
+                ee.Filter.gte("size", self.thresholds["landscape_size"]),
+                ee.Filter.gte("probability", self.thresholds["landscape_probability"]),
+                ee.Filter.gte("effort", self.thresholds["landscape_survey_effort"]),
+            ),
+            "scl_restoration": ee.Filter.And(
+                ee.Filter.gte("size", self.thresholds["landscape_size"]),
+                ee.Filter.lt("probability", self.thresholds["landscape_probability"]),
+                ee.Filter.gte("effort", self.thresholds["landscape_survey_effort"]),
+            ),
+            "scl_survey": ee.Filter.And(
+                ee.Filter.gte("size", self.thresholds["landscape_size"]),
+                ee.Filter.gte("probability", self.thresholds["landscape_probability"]),
+                ee.Filter.lt("effort", self.thresholds["landscape_survey_effort"]),
+            ),
+            "scl_fragment": ee.Filter.And(
+                ee.Filter.lt("size", self.thresholds["landscape_size"]),
+                ee.Filter.gte("probability", self.thresholds["landscape_probability"]),
+                ee.Filter.gte("effort", self.thresholds["landscape_survey_effort"]),
+            ),
+        }
+
+    def distance_km_to_pixels(self, distance_km, image_resolution):
+        image_resolution = ee.Number(image_resolution)
+        scale_km = image_resolution.divide(1000)
+        pixel_distance = ee.Number(distance_km).divide(scale_km).int()
+        return pixel_distance
+
+    def area_km_to_pixels(self, area_km, image_resolution):
+        image_resolution = ee.Number(image_resolution)
+        resolution_km = image_resolution.divide(1000)
+        scale_km = resolution_km.pow(2)
+        n_pixels = ee.Number(area_km).divide(scale_km).int()
+        return n_pixels
+
+    def density_to_patch_size(self, ft):
+        med_density_eco = ee.Number(ft.get("MED_DENSITY_ECO"))
+        med_density_biome = ee.Number(ft.get("MED_DENSITY_BIOME"))
+        med_density_eco_biome = ee.Number(ft.get("MED_DENSITY_ECO_BIOME"))
+        density_val = ee.Algorithms.If(
+            med_density_eco.gt(0),
+            med_density_eco,
+            ee.Algorithms.If(
+                med_density_biome.gt(0),
+                med_density_biome,
+                ee.Algorithms.If(med_density_eco_biome.gt(0), med_density_eco_biome, 1),
+            ),
+        )
+        min_core_size = (
+            ee.Number(self.density_values["n_core_animals"])
+            .divide(density_val)
+            .multiply(100)
+            .int()
+        )
+        min_core_size_pixels = self.area_km_to_pixels(min_core_size, self.scale)
+        return ee.Feature(
+            None,
+            {"ECO_ID": ft.get("ECO_ID"), "min_core_size": min_core_size_pixels},
+        )
+
+    def dilate(self, image, distance):
+        pixel_distance = self.distance_km_to_pixels(distance, self.scale)
+        dialated_image = image.fastDistanceTransform(pixel_distance).sqrt()
+        return dialated_image.lte(pixel_distance).selfMask()
+
+    def poly_export(self, polys, scl_name):
+        size_test = polys.size().gt(0).getInfo()
+        path = "pothab/" + scl_name
+        if size_test:
+            self.export_fc_ee(polys, path)
+        else:
+            print("no " + scl_name + " polygons delineated")
 
     def calc(self):
-        def distance_km_to_pixels(distance_km, image_resolution):
-            image_resolution = ee.Number(image_resolution)
-            scale_km = image_resolution.divide(1000)
-            pixel_distance = ee.Number(distance_km).divide(scale_km).int()
-            return pixel_distance
-
-        def area_km_to_pixels(area_km, image_resolution):
-            image_resolution = ee.Number(image_resolution)
-            resolution_km = image_resolution.divide(1000)
-            scale_km = resolution_km.pow(2)
-            n_pixels = ee.Number(area_km).divide(scale_km).int()
-            return n_pixels
-
-        def density_to_patch_size(ft):
-            med_density_eco = ee.Number(ft.get("MED_DENSITY_ECO"))
-            med_density_biome = ee.Number(ft.get("MED_DENSITY_BIOME"))
-            med_density_eco_biome = ee.Number(ft.get("MED_DENSITY_ECO_BIOME"))
-            density_val = ee.Algorithms.If(
-                med_density_eco.gt(0),
-                med_density_eco,
-                ee.Algorithms.If(
-                    med_density_biome.gt(0),
-                    med_density_biome,
-                    ee.Algorithms.If(
-                        med_density_eco_biome.gt(0), med_density_eco_biome, 1
-                    ),
-                ),
-            )
-            min_core_size = (
-                ee.Number(self.density_values["n_core_animals"])
-                .divide(density_val)
-                .multiply(100)
-                .int()
-            )
-            min_core_size_pixels = area_km_to_pixels(min_core_size, self.scale)
-            return ee.Feature(
-                None,
-                {"ECO_ID": ft.get("ECO_ID"), "min_core_size": min_core_size_pixels},
-            )
-
-        def dilate(image, distance):
-            pixel_distance = distance_km_to_pixels(distance, self.scale)
-            dialated_image = image.fastDistanceTransform(pixel_distance).sqrt()
-            return dialated_image.lte(pixel_distance).selfMask()
-
-        def poly_export(polys, scl_name):
-            size_test = polys.size().gt(0).getInfo()
-            path = "pothab/" + scl_name
-            if size_test:
-                self.export_fc_ee(polys, path)
-            else:
-                print("no " + scl_name + " polygons delineated")
-
         str_hab_mask = self.structural_habitat.gte(
             self.thresholds["structural_habitat"]
         ).selfMask()
 
         str_hab_resolution = self.structural_habitat.projection().nominalScale()
-        str_hab_connected_pixels = area_km_to_pixels(
+        str_hab_connected_pixels = self.area_km_to_pixels(
             self.thresholds["structural_habitat_patch_size"], str_hab_resolution
         )
 
         connected_str_hab = str_hab_mask.connectedPixelCount(
             str_hab_connected_pixels, str_hab_resolution
-        ).reproject("EPSG:4326", None, str_hab_resolution)
+        ).reproject(self.crs, None, str_hab_resolution)
 
         low_hii_mask = self.hii.lte(self.thresholds["hii"]).selfMask()
 
         str_hab = str_hab_mask.updateMask(low_hii_mask).updateMask(self.water)
 
-        max_core_pixels = area_km_to_pixels(
+        max_core_pixels = self.area_km_to_pixels(
             self.density_values["core_size_limits"]["max"], self.scale
         )
 
-        min_core_pixels = area_km_to_pixels(
+        min_core_pixels = self.area_km_to_pixels(
             self.density_values["core_size_limits"]["min"], self.scale
         )
 
-        max_step_pixels = area_km_to_pixels(
+        max_step_pixels = self.area_km_to_pixels(
             self.density_values["step_size_limits"]["max"], self.scale
         )
 
-        min_step_pixels = area_km_to_pixels(
+        min_step_pixels = self.area_km_to_pixels(
             self.density_values["step_size_limits"]["min"], self.scale
         )
 
         connected_potential_habitat = str_hab.connectedPixelCount(
             max_core_pixels, True
-        ).reproject(crs="EPSG:4326", scale=self.scale)
+        ).reproject(crs=self.crs, scale=self.scale)
 
         potential_habitat = connected_potential_habitat.updateMask(
             connected_potential_habitat.gte(min_step_pixels)
         ).selfMask()
 
-        density = self.density.map(density_to_patch_size)
+        density = self.density.map(self.density_to_patch_size)
 
         ecoregion_image = self.ecoregions.reduceToImage(
             properties=["ECO_ID"], reducer=ee.Reducer.mode()
@@ -246,15 +247,17 @@ class SCLPolygons(SCLTask):
         )
 
         potential_core = (
-            dilate(potential_core, self.thresholds["connectity_distance"])
-            .reproject(crs="EPSG:4326", scale=self.scale)
+            self.dilate(potential_core, self.thresholds["connectity_distance"])
+            .reproject(crs=self.crs, scale=self.scale)
             .multiply(3)
             .unmask(0)
             .updateMask(self.water)
         )
         potential_stepping_stone = (
-            dilate(potential_stepping_stone, self.thresholds["connectity_distance"])
-            .reproject(crs="EPSG:4326", scale=self.scale)
+            self.dilate(
+                potential_stepping_stone, self.thresholds["connectity_distance"]
+            )
+            .reproject(crs=self.crs, scale=self.scale)
             .unmask(0)
             .updateMask(self.water)
         )
@@ -278,59 +281,25 @@ class SCLPolygons(SCLTask):
             .rename(["scl_poly", "size", "probability", "effort"])
             .reduceToVectors(
                 reducer=ee.Reducer.max(),  # TODO: need to consider reducer for each band to delineate polygons
-                geometry=ee.Geometry.MultiPolygon(self.aoi).bounds(),
+                geometry=ee.Geometry.Polygon(self.extent),
                 scale=self.scale,
-                crs="EPSG:4326",
+                crs=self.crs,
                 maxPixels=self.ee_max_pixels,
             )
         )
 
-        scl_species = scl_polys.filter(
-            ee.Filter.And(
-                ee.Filter.gte("size", self.scl_poly_filters["scl_species"]["size"]),
-                ee.Filter.gte(
-                    "probability", self.scl_poly_filters["scl_species"]["probability"]
-                ),
-                ee.Filter.gte("effort", self.scl_poly_filters["scl_species"]["effort"]),
-            )
-        )
+        scl_species = scl_polys.filter(self.scl_poly_filters["scl_species"])
 
-        scl_survey = scl_polys.filter(
-            ee.Filter.And(
-                ee.Filter.gte("size", self.scl_poly_filters["scl_survey"]["size"]),
-                ee.Filter.gte(
-                    "probability", self.scl_poly_filters["scl_survey"]["probability"]
-                ),
-                ee.Filter.lte("effort", self.scl_poly_filters["scl_survey"]["effort"]),
-            )
-        )
+        scl_survey = scl_polys.filter(self.scl_poly_filters["scl_survey"])
 
-        scl_restoration = scl_polys.filter(
-            ee.Filter.And(
-                ee.Filter.gte("size", self.scl_poly_filters["scl_restoration"]["size"]),
-                ee.Filter.lte(
-                    "probability",
-                    self.scl_poly_filters["scl_restoration"]["probability"],
-                ),
-                ee.Filter.lte(
-                    "effort", self.scl_poly_filters["scl_restoration"]["effort"]
-                ),
-            )
-        )
+        scl_restoration = scl_polys.filter(self.scl_poly_filters["scl_restoration"])
 
-        scl_fragment = scl_polys.filter(
-            ee.Filter.And(
-                ee.Filter.lte("size", self.scl_poly_filters["scl_fragment"]["size"]),
-                ee.Filter.gte(
-                    "probability", self.scl_poly_filters["scl_fragment"]["probability"]
-                ),
-            )
-        )
+        scl_fragment = scl_polys.filter(self.scl_poly_filters["scl_fragment"])
 
-        poly_export(scl_species, "scl_species")
-        poly_export(scl_survey, "scl_survey")
-        poly_export(scl_restoration, "scl_restoration")
-        poly_export(scl_fragment, "scl_fragment")
+        self.poly_export(scl_species, "scl_species")
+        self.poly_export(scl_survey, "scl_survey")
+        self.poly_export(scl_restoration, "scl_restoration")
+        self.poly_export(scl_fragment, "scl_fragment")
 
     def check_inputs(self):
         super().check_inputs()
