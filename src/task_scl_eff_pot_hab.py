@@ -50,11 +50,12 @@ class SCLPolygons(SCLTask):
     }
     thresholds = {
         "structural_habitat": 0.5,
-        "elev": 3350,
+        "reduce_res_input_pixels": 0.5,
+        "elev": 3350,  # TODO: take out
         "structural_habitat_patch_size": 5,  # sq km
         "hii": 18,  # TODO: HII will eventually be spatially dynamic by zone or country
         "probability": 1,  # TODO: probability threshold may change based on final probability format
-        "connectity_distance": 2,  # km (1/2 of actual dispersal distance)
+        "connectity_distance": 2,  # km (1/2 of actual dispersal distance) # TODO: spelling
         "landscape_size": 3,
         "landscape_probability": 1,
         "landscape_survey_effort": 1,
@@ -169,13 +170,33 @@ class SCLPolygons(SCLTask):
             self.thresholds["structural_habitat_patch_size"], str_hab_resolution
         )
 
-        connected_str_hab = str_hab_mask.connectedPixelCount(
-            str_hab_connected_pixels, str_hab_resolution
-        ).reproject(self.crs, None, str_hab_resolution)
+        connected_str_hab = (
+            str_hab_mask.connectedPixelCount(str_hab_connected_pixels, True)
+            .gte(str_hab_connected_pixels)
+            .selfMask()
+            .reproject(self.crs, None, str_hab_resolution)
+        )
 
         low_hii_mask = self.hii.lte(self.thresholds["hii"]).selfMask()
 
-        str_hab = str_hab_mask.updateMask(low_hii_mask).updateMask(self.water)
+        eff_pot_hab = (
+            str_hab_mask.updateMask(low_hii_mask)
+            .rename("eff_pot_hab")
+            .unmask(0)
+            .reduceResolution(ee.Reducer.mean())
+            .gte(self.thresholds["reduce_res_input_pixels"])
+            .selfMask()
+            .rename("eff_pot_hab")
+        )
+
+        eff_pot_hab_export = (
+            connected_str_hab.updateMask(low_hii_mask)
+            .unmask(0)
+            .reduceResolution(ee.Reducer.mean())
+            .gte(self.thresholds["reduce_res_input_pixels"])
+            .selfMask()
+            .rename("eff_pot_hab")
+        )
 
         max_core_pixels = self.area_km_to_pixels(
             self.density_values["core_size_limits"]["max"], self.scale
@@ -193,7 +214,7 @@ class SCLPolygons(SCLTask):
             self.density_values["step_size_limits"]["min"], self.scale
         )
 
-        connected_potential_habitat = str_hab.connectedPixelCount(
+        connected_potential_habitat = eff_pot_hab.connectedPixelCount(
             max_core_pixels, True
         ).reproject(crs=self.crs, scale=self.scale)
 
@@ -300,6 +321,8 @@ class SCLPolygons(SCLTask):
         self.poly_export(scl_survey, "scl_survey")
         self.poly_export(scl_restoration, "scl_restoration")
         self.poly_export(scl_fragment, "scl_fragment")
+
+        self.export_image_ee(eff_pot_hab_export, "pothab/potential_habitat")
 
     def check_inputs(self):
         super().check_inputs()
