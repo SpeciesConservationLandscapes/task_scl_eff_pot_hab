@@ -267,7 +267,7 @@ class SCLPolygons(SCLTask):
         )
 
         potential_core = (
-            self.dilate(potential_core, self.thresholds["connectity_distance"])
+            self.dilate(potential_core, self.thresholds["connectivity_distance"])
             .reproject(crs=self.crs, scale=self.scale)
             .multiply(3)
             .unmask(0)
@@ -275,7 +275,7 @@ class SCLPolygons(SCLTask):
         )
         potential_stepping_stone = (
             self.dilate(
-                potential_stepping_stone, self.thresholds["connectity_distance"]
+                potential_stepping_stone, self.thresholds["connectivity_distance"]
             )
             .reproject(crs=self.crs, scale=self.scale)
             .unmask(0)
