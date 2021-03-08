@@ -51,11 +51,10 @@ class SCLPolygons(SCLTask):
     thresholds = {
         "structural_habitat": 0.5,
         "reduce_res_input_pixels": 0.5,
-        "elev": 3350,  # TODO: take out
         "structural_habitat_patch_size": 5,  # sq km
         "hii": 18,  # TODO: HII will eventually be spatially dynamic by zone or country
         "probability": 1,  # TODO: probability threshold may change based on final probability format
-        "connectity_distance": 2,  # km (1/2 of actual dispersal distance) # TODO: spelling
+        "connectivity_distance": 2,  # km (1/2 of actual dispersal distance)
         "landscape_size": 3,
         "landscape_probability": 1,
         "landscape_survey_effort": 1,
