@@ -49,8 +49,8 @@ class SCLPolygons(SCLTask):
         },
         "density": {
             "ee_type": SCLTask.FEATURECOLLECTION,
-            "ee_path": "projects/SCL/v1/Panthera_tigris/source/density/tiger_obs_density",
-            "static": True,
+            "ee_path": "projects/SCL/v1/Panthera_tigris/biome_density",
+            "maxage": 10,
         },
     }
     thresholds = {
@@ -90,7 +90,9 @@ class SCLPolygons(SCLTask):
         self.historic_range = ee.Image(self.inputs["historic_range"]["ee_path"])
         self.extirpated_range = ee.Image(self.inputs["extirpated_range"]["ee_path"])
         self.ecoregions = ee.FeatureCollection(self.inputs["ecoregions"]["ee_path"])
-        self.density = ee.FeatureCollection(self.inputs["density"]["ee_path"])
+        self.density, density_date = self.get_most_recent_featurecollection(
+            self.inputs["density"]["ee_path"]
+        )
         self.water = ee.Image(self.inputs["water"]["ee_path"])
         self.scl_poly_filters = {
             "scl_species": ee.Filter.And(
@@ -315,7 +317,7 @@ class SCLPolygons(SCLTask):
             ee.Image(0)
             .where(historic.eq(1), ee.Image(2))
             .where(extirpated.eq(1), ee.Image(1))
-        )
+        ).selfMask()
 
         # TODO: incorporate actual survey effort input
         survey_effort = ee.Image.constant(1)
@@ -323,10 +325,7 @@ class SCLPolygons(SCLTask):
         scl_polys = (
             ee.Image(1)
             .updateMask(scl_polys)
-            .addBands(scl_polys)
-            .addBands(range_binary)
-            .addBands(probability_thresh)
-            .addBands(survey_effort)
+            .addBands([scl_polys, range_binary, probability_thresh, survey_effort])
             .rename(["scl_poly", "size", "range", "probability", "effort"])
             .reduceToVectors(
                 reducer=ee.Reducer.max(),  # TODO: need to consider reducer for each band to delineate polygons
