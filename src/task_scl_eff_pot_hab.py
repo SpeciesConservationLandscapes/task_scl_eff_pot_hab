@@ -32,6 +32,11 @@ class SCLPolygons(SCLTask):
             "ee_path": "projects/SCL/v1/Panthera_tigris/historical_range_img_200914",
             "static": True,
         },
+        "extirpated_range": {
+            "ee_type": SCLTask.IMAGE,
+            "ee_path": "projects/SCL/v1/Panthera_tigris/source/Inputs_2006/extirp_fin",
+            "static": True,
+        },
         "water": {
             "ee_type": SCLTask.IMAGE,
             "ee_path": "projects/HII/v1/source/phys/watermask_jrc70_cciocean",
@@ -56,6 +61,7 @@ class SCLPolygons(SCLTask):
         "probability": 1,  # TODO: probability threshold may change based on final probability format
         "connectivity_distance": 2,  # km (1/2 of actual dispersal distance)
         "landscape_size": 3,
+        "current_range": 2,
         "landscape_probability": 1,
         "landscape_survey_effort": 1,
     }
@@ -82,27 +88,40 @@ class SCLPolygons(SCLTask):
             ee.ImageCollection(self.inputs["hii"]["ee_path"])
         )
         self.historic_range = ee.Image(self.inputs["historic_range"]["ee_path"])
+        self.extirpated_range = ee.Image(self.inputs["extirpated_range"]["ee_path"])
         self.ecoregions = ee.FeatureCollection(self.inputs["ecoregions"]["ee_path"])
         self.density = ee.FeatureCollection(self.inputs["density"]["ee_path"])
         self.water = ee.Image(self.inputs["water"]["ee_path"])
         self.scl_poly_filters = {
             "scl_species": ee.Filter.And(
                 ee.Filter.gte("size", self.thresholds["landscape_size"]),
+                ee.Filter.eq("range", self.thresholds["current_range"]),
                 ee.Filter.gte("probability", self.thresholds["landscape_probability"]),
                 ee.Filter.gte("effort", self.thresholds["landscape_survey_effort"]),
             ),
-            "scl_restoration": ee.Filter.And(
-                ee.Filter.gte("size", self.thresholds["landscape_size"]),
-                ee.Filter.lt("probability", self.thresholds["landscape_probability"]),
-                ee.Filter.gte("effort", self.thresholds["landscape_survey_effort"]),
+            "scl_restoration": ee.Filter.Or(
+                ee.Filter.And(
+                    ee.Filter.gte("size", self.thresholds["landscape_size"]),
+                    ee.Filter.eq("range", self.thresholds["current_range"]),
+                    ee.Filter.lt(
+                        "probability", self.thresholds["landscape_probability"]
+                    ),
+                    ee.Filter.gte("effort", self.thresholds["landscape_survey_effort"]),
+                ),
+                ee.Filter.And(
+                    ee.Filter.gte("size", self.thresholds["landscape_size"]),
+                    ee.Filter.lt("range", self.thresholds["current_range"]),
+                ),
             ),
             "scl_survey": ee.Filter.And(
                 ee.Filter.gte("size", self.thresholds["landscape_size"]),
+                ee.Filter.eq("range", self.thresholds["current_range"]),
                 ee.Filter.gte("probability", self.thresholds["landscape_probability"]),
                 ee.Filter.lt("effort", self.thresholds["landscape_survey_effort"]),
             ),
             "scl_fragment": ee.Filter.And(
                 ee.Filter.lt("size", self.thresholds["landscape_size"]),
+                ee.Filter.eq("range", self.thresholds["current_range"]),
                 ee.Filter.gte("probability", self.thresholds["landscape_probability"]),
                 ee.Filter.gte("effort", self.thresholds["landscape_survey_effort"]),
             ),
@@ -289,6 +308,15 @@ class SCLPolygons(SCLTask):
             self.probability.add(1).gte(self.thresholds["probability"]).selfMask()
         )
 
+        historic = self.historic_range.unmask(0)
+        extirpated = self.extirpated_range.eq(0)
+
+        range_binary = (
+            ee.Image(0)
+            .where(historic.eq(1), ee.Image(2))
+            .where(extirpated.eq(1), ee.Image(1))
+        )
+
         # TODO: incorporate actual survey effort input
         survey_effort = ee.Image.constant(1)
 
@@ -296,9 +324,10 @@ class SCLPolygons(SCLTask):
             ee.Image(1)
             .updateMask(scl_polys)
             .addBands(scl_polys)
+            .addBands(range_binary)
             .addBands(probability_thresh)
             .addBands(survey_effort)
-            .rename(["scl_poly", "size", "probability", "effort"])
+            .rename(["scl_poly", "size", "range", "probability", "effort"])
             .reduceToVectors(
                 reducer=ee.Reducer.max(),  # TODO: need to consider reducer for each band to delineate polygons
                 geometry=ee.Geometry.Polygon(self.extent),
