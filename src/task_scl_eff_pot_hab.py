@@ -50,7 +50,6 @@ class SCLPolygons(SCLTask):
         "density": {
             "ee_type": SCLTask.FEATURECOLLECTION,
             "ee_path": "projects/SCL/v1/Panthera_tigris/biome_density",
-            "maxage": 10,
         },
     }
     thresholds = {
@@ -325,7 +324,9 @@ class SCLPolygons(SCLTask):
         scl_polys = (
             ee.Image(1)
             .updateMask(scl_polys)
-            .addBands([scl_polys, range_binary, probability_thresh, survey_effort])
+            .addBands(
+                [scl_polys, scl_polys, range_binary, probability_thresh, survey_effort]
+            )
             .rename(["scl_poly", "size", "range", "probability", "effort"])
             .reduceToVectors(
                 reducer=ee.Reducer.max(),  # TODO: need to consider reducer for each band to delineate polygons
