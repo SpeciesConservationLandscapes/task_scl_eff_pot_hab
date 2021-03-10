@@ -324,12 +324,10 @@ class SCLPolygons(SCLTask):
         scl_polys = (
             ee.Image(1)
             .updateMask(scl_polys)
-            .addBands(
-                [scl_polys, scl_polys, range_binary, probability_thresh, survey_effort]
-            )
+            .addBands([scl_polys, range_binary, probability_thresh, survey_effort])
             .rename(["scl_poly", "size", "range", "probability", "effort"])
             .reduceToVectors(
-                reducer=ee.Reducer.max(),  # TODO: need to consider reducer for each band to delineate polygons
+                reducer=ee.Reducer.max(),  # TODO: may need to consider a unique reducer for each band to delineate polygons
                 geometry=ee.Geometry.Polygon(self.extent),
                 scale=self.scale,
                 crs=self.crs,
