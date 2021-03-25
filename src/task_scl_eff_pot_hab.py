@@ -50,13 +50,19 @@ class SCLPolygons(SCLTask):
         "density": {
             "ee_type": SCLTask.FEATURECOLLECTION,
             "ee_path": "projects/SCL/v1/Panthera_tigris/biome_density",
+            "static": True,
+        },
+        "zones": {
+            "ee_type": SCLTask.FEATURECOLLECTION,
+            "ee_path": "projects/SCL/v1/Panthera_tigris/zones",
+            "static": True,
         },
     }
     thresholds = {
         "structural_habitat": 0.5,
         "reduce_res_input_pixels": 0.5,
         "structural_habitat_patch_size": 5,  # sq km
-        "hii": 18,  # TODO: HII will eventually be spatially dynamic by zone or country
+        "hii": 18,  # TODO: have a default value if thresholding functions fail
         "probability": 1,  # TODO: probability threshold may change based on final probability format
         "connectivity_distance": 2,  # km (1/2 of actual dispersal distance)
         "landscape_size": 3,
@@ -93,6 +99,7 @@ class SCLPolygons(SCLTask):
             self.inputs["density"]["ee_path"]
         )
         self.water = ee.Image(self.inputs["water"]["ee_path"])
+        self.zones = ee.FeatureCollection(self.inputs["zones"]["ee_path"])
         self.scl_poly_filters = {
             "scl_species": ee.Filter.And(
                 ee.Filter.gte("size", self.thresholds["landscape_size"]),
@@ -179,6 +186,107 @@ class SCLPolygons(SCLTask):
         else:
             print("no " + scl_name + " polygons delineated")
 
+    def threshold_calc(self, var_image, prob_image, zone_fc, bin_property):
+        high_prob = prob_image.gte(self.thresholds["probability"]).selfMask()
+        var_high_prob = var_image.updateMask(high_prob)
+        threshold_image = var_image.addBands(var_high_prob).rename(
+            ["all_vals", "high_prob_vals"]
+        )
+        zone_numbers = zone_fc.aggregate_histogram("Biome_zone").keys()
+
+        def get_threshold(histogram_fc, zone_num):
+            def thresh_val(li):
+                bin_val = ee.Number(li)
+                prev_bin = bin_val.subtract(1)
+                next_bin = bin_val.add(1)
+                previous_test = ee.Number(
+                    histogram_fc.filter(ee.Filter.eq(bin_property, prev_bin))
+                    .first()
+                    .get("difference")
+                ).gt(0)
+                next_test = ee.Number(
+                    histogram_fc.filter(ee.Filter.eq(bin_property, next_bin))
+                    .first()
+                    .get("difference")
+                ).lt(0)
+
+                return ee.Feature(
+                    None, {"bin": bin_val, "test_1": previous_test, "test_2": next_test}
+                )
+
+            bins = histogram_fc.aggregate_array(bin_property).slice(10, 90, 1)
+
+            threshold = (
+                ee.FeatureCollection(bins.map(thresh_val))
+                .filter(
+                    ee.Filter.And(ee.Filter.eq("test_1", 1), ee.Filter.eq("test_2", 1))
+                )
+                .first()
+                .get("bin")
+            )
+            return ee.Feature(None, {"zone": zone_num, "threshold": threshold})
+
+        def zone_thresh_calc(li):
+            zone_number = ee.Number.parse(li)
+            zone = zone_fc.filter(ee.Filter.eq("Biome_zone", zone_number))
+            zone_bounds = zone.geometry().bounds()
+            zone_image = threshold_image.clipToCollection(zone)
+            hist_reducer = ee.Reducer.count().combine(
+                ee.Reducer.fixedHistogram(0, 100, 100), None, True
+            )
+            zone_hist = zone_image.reduceRegion(
+                reducer=hist_reducer,
+                geometry=zone_bounds,
+                scale=self.scale,
+                crs=self.crs,
+                maxPixels=self.ee_max_pixels,
+                tileScale=16,
+            )
+            count_all = zone_hist.get("all_vals_count")
+            count_high = zone_hist.get("high_prob_vals_count")
+            hist_all = (
+                ee.Array(zone_hist.get("all_vals_histogram")).slice(1, 0, 2).toList()
+            )
+            hist_high = (
+                ee.Array(zone_hist.get("high_prob_vals_histogram"))
+                .slice(1, 0, 2)
+                .toList()
+            )
+
+            def hist_fc_calc(li):
+                all = ee.List(ee.List(li).get(0))
+                high = ee.List(ee.List(li).get(1))
+                var_val = all.get(0)
+                proportion_all = ee.Number(all.get(1)).divide(count_all)
+                proportion_high = ee.Number(high.get(1)).divide(count_high)
+                diff = proportion_high.subtract(proportion_all)
+                return ee.Feature(
+                    None,
+                    {
+                        "zone": zone_number,
+                        "var_val": var_val,
+                        "proportion_all": proportion_all,
+                        "proportion_high": proportion_high,
+                        "difference": diff,
+                    },
+                )
+
+            hist_fc = ee.FeatureCollection(hist_all.zip(hist_high).map(hist_fc_calc))
+
+            return get_threshold(hist_fc, zone_number)
+
+        return zone_numbers.map(zone_thresh_calc)
+
+    def threshold_image(self, threshold_fc, zone_fc, variable):
+        zone_image = zone_fc.reduceToImage(
+            properties=["Biome_zone"], reducer=ee.Reducer.first()
+        )
+        zone_list = threshold_fc.aggregate_array("zone")
+        threshold_list = threshold_fc.aggregate_array("threshold")
+        return zone_image.remap(zone_list, threshold_list).rename(
+            "{}_threshold".format(variable)
+        )
+
     def calc(self):
         str_hab_mask = self.structural_habitat.gte(
             self.thresholds["structural_habitat"]
@@ -196,7 +304,20 @@ class SCLPolygons(SCLTask):
             .reproject(self.crs, None, str_hab_resolution)
         )
 
-        low_hii_mask = self.hii.lte(self.thresholds["hii"]).selfMask()
+        hii__zone_thresholds = ee.FeatureCollection(
+            self.threshold_calc(
+                self.hii,
+                str_hab_mask,  # TODO: change to use probability image when available
+                self.zones,
+                "var_val",
+            )
+        )
+        print(hii__zone_thresholds.getInfo())
+        hii_threshold_image = self.threshold_image(
+            hii__zone_thresholds, self.zones, "hii"
+        )
+
+        low_hii_mask = self.hii.lte(hii_threshold_image).selfMask()
 
         eff_pot_hab = (
             str_hab_mask.updateMask(low_hii_mask)
@@ -343,12 +464,12 @@ class SCLPolygons(SCLTask):
 
         scl_fragment = scl_polys.filter(self.scl_poly_filters["scl_fragment"])
 
-        self.poly_export(scl_species, "scl_species")
-        self.poly_export(scl_survey, "scl_survey")
-        self.poly_export(scl_restoration, "scl_restoration")
-        self.poly_export(scl_fragment, "scl_fragment")
+        # self.poly_export(scl_species, "scl_species")
+        # self.poly_export(scl_survey, "scl_survey")
+        # self.poly_export(scl_restoration, "scl_restoration")
+        # self.poly_export(scl_fragment, "scl_fragment")
 
-        self.export_image_ee(eff_pot_hab_export, "pothab/potential_habitat")
+        # self.export_image_ee(eff_pot_hab_export, "pothab/potential_habitat")
 
     def check_inputs(self):
         super().check_inputs()
