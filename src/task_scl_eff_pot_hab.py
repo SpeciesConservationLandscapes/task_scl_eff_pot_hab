@@ -1,6 +1,5 @@
 import argparse
 import ee
-import time
 from datetime import datetime, timezone
 from task_base import SCLTask
 
@@ -63,7 +62,7 @@ class SCLPolygons(SCLTask):
         "structural_habitat": 0.5,
         "reduce_res_input_pixels": 0.5,
         "structural_habitat_patch_size": 5,  # sq km
-        "hii": 18,  # TODO: have a default value if thresholding functions fail
+        "hii": 18,  # TODO: use this as a default value, if dynamic thresholding fails
         "probability": 1,  # TODO: probability threshold may change based on final probability format
         "connectivity_distance": 2,  # km (1/2 of actual dispersal distance)
         "landscape_size": 3,
@@ -77,6 +76,14 @@ class SCLPolygons(SCLTask):
         "core_size_limits": {"min": 30, "max": 625},  # size min/max in sqkm
         "step_size_limits": {"min": 3, "max": 63},  # size min/max in sqkm
     }
+
+    def histogram_reducer(self, min, max, number):
+        return (
+            ee.Reducer.count()
+            .combine(ee.Reducer.fixedHistogram(min, max, number), None, True)
+            .repeat(2)
+            .group(2, "zone")
+        )
 
     def scenario_probability(self):
         return f"{self.ee_rootdir}/probability"
@@ -100,14 +107,9 @@ class SCLPolygons(SCLTask):
         )
         self.water = ee.Image(self.inputs["water"]["ee_path"])
         self.zones = ee.FeatureCollection(self.inputs["zones"]["ee_path"])
-        self.zones_image = ee.Image()
-        # Add other class properties here for thresholding if necessary
-        self.histogram_threshold_variables = {
-            "histogram_reducer": ee.Reducer.count()
-            .combine(ee.Reducer.fixedHistogram(0, 100, 100), None, True)
-            .repeat(2)
-            .group(2, "zone"),
-        }
+        self.zones_image = self.zones.reduceToImage(
+            [self.ZONES_LABEL], ee.Reducer.first()
+        ).selfMask()
 
         self.scl_poly_filters = {
             "scl_species": ee.Filter.And(
@@ -143,12 +145,6 @@ class SCLPolygons(SCLTask):
                 ee.Filter.gte("effort", self.thresholds["landscape_survey_effort"]),
             ),
         }
-
-    @property
-    def zone_image(self):
-        return self.zones.reduceToImage(
-            [self.ZONES_LABEL], ee.Reducer.first()
-        ).selfMask()
 
     def distance_km_to_pixels(self, distance_km, image_resolution):
         image_resolution = ee.Number(image_resolution)
@@ -204,31 +200,28 @@ class SCLPolygons(SCLTask):
     def build_threshold_calc_image(
         self, threshold_variable_image, probability_image, variable_name
     ):
-        high_probability = probability_image.gte(
-            self.thresholds["probability"]
-        ).selfMask()
         variable_high_probability = threshold_variable_image.updateMask(
-            high_probability
+            probability_image.selfMask()
         )
         return (
             threshold_variable_image.addBands(
-                [variable_high_probability, self.zone_image]
+                [variable_high_probability, self.zones_image]
             )
-            .updateMask(self.zone_image)
+            .updateMask(self.zones_image)
             .rename(
                 [
-                    "{}_all_vals".format(variable_name),
-                    "{}_high_prob_vals".format(variable_name),
+                    f"{variable_name}_all_vals",
+                    f"{variable_name}_high_prob_vals",
                     "zone",
                 ]
             )
         )
 
-    def histogram_calc(self, threshold_calc_image, histogram_reducer):
+    def histogram_calc(self, threshold_calc_image, hist_reducer):
         return ee.List(
             ee.Dictionary(
                 threshold_calc_image.reduceRegion(
-                    reducer=histogram_reducer,
+                    reducer=hist_reducer,
                     geometry=ee.Geometry.Polygon(self.extent),
                     scale=self.scale,
                     crs=self.crs,
@@ -240,14 +233,14 @@ class SCLPolygons(SCLTask):
 
     def zone_threshold_calc(self, zone_histogram_objects):
         # histogram_format is mapped over zone_histogram_objects
-        # Each zone_object  contains the counts and histograms for a zone
+        # returns a list of lists [[zone_number,...], [threshold,...]]
         def histogram_format(zone_object):
-            zone_dictionay = ee.Dictionary(zone_object)
-            zone_number = zone_dictionay.get("zone")  # currently this does not get used
-            pixel_counts = ee.List(zone_dictionay.get("count"))
+            zone_dictionary = ee.Dictionary(zone_object)
+            zone_number = zone_dictionary.get("zone")
+            pixel_counts = ee.List(zone_dictionary.get("count"))
             pixel_count_all = ee.Number(pixel_counts.get(0))
             pixel_count_high = ee.Number(pixel_counts.get(1))
-            histograms = ee.List(zone_dictionay.get("histogram"))
+            histograms = ee.List(zone_dictionary.get("histogram"))
 
             bin = ee.Array(histograms.get(0)).slice(1, 0, 1).toList().flatten()
             histogram_all_pixels = (
@@ -259,9 +252,9 @@ class SCLPolygons(SCLTask):
             histogram_combine = bin.zip(
                 histogram_all_pixels.zip(histogram_high_probability_pixels)
             )
-
-            # threshold_calcis mapped over hist_combine
-            # each histogram object is a list of list where each list item is [bin_value, frequency_all_pixels, frequency_high_probablity_pixels]
+            # threshold_calc is mapped over hist_combine
+            # each histogram object is a list of lists: [bin_value, frequency_all_pixels, frequency_high_probablity_pixels]
+            # returns list of bin values where propotional difference is gte 0
             def threshold_calc(histogram_object):
                 histogram_item_list = ee.List(histogram_object)
                 bin_value = ee.Number(histogram_item_list.get(0))
@@ -271,21 +264,25 @@ class SCLPolygons(SCLTask):
                 proportion_all = frequency_all.divide(pixel_count_all)
                 proportion_high = frequency_high.divide(pixel_count_high)
                 difference = proportion_high.subtract(proportion_all)
+                # if difference is gte to 0, returns bin value; if difference is < 0, returns 0
                 return ee.Number(bin_value.multiply(difference.gte(0))).int()
 
+            # returns the maximum bin value with a positive proportional difference
             threshold = histogram_combine.map(threshold_calc).reduce(ee.Reducer.max())
             return [zone_number, threshold]
 
+        # converts [[zone_number, threshold],...] to [[zone_number,...], [threshold,...]]
         zone_threshold_list = (
             ee.Array(zone_histogram_objects.map(histogram_format)).transpose().toList()
         )
+        # TODO: 1. identify and handle edge cases; 2. return default value if thresholding fails
         return zone_threshold_list
 
     def zone_threshold_image(self, zone_threshold_lists, variable_name):
         zone_numbers = zone_threshold_lists.get(0)
         threshold_vals = zone_threshold_lists.get(1)
-        return self.zone_image.remap(zone_numbers, threshold_vals).rename(
-            "{}_thresholds".format(variable_name)
+        return self.zones_image.remap(zone_numbers, threshold_vals).rename(
+            f"{variable_name}_thresholds"
         )
 
     def calc(self):
@@ -306,12 +303,14 @@ class SCLPolygons(SCLTask):
         )
 
         hii_thresholding_image = self.build_threshold_calc_image(
-            self.hii, str_hab_mask, "HII"
+            self.hii,
+            str_hab_mask,  # TODO: replace str_hab_mask with probability when available
+            "HII",
         )
 
         hii_thresholding_histograms = self.histogram_calc(
             hii_thresholding_image,
-            self.histogram_threshold_variables["histogram_reducer"],
+            self.histogram_reducer(0, 100, 100),
         )
 
         hii_threshold_values = self.zone_threshold_calc(hii_thresholding_histograms)
