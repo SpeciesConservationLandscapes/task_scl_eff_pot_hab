@@ -57,6 +57,11 @@ class SCLPolygons(SCLTask):
             "ee_path": "projects/SCL/v1/Panthera_tigris/zones",
             "static": True,
         },
+        "zones_image": {
+            "ee_type": SCLTask.IMAGE,
+            "ee_path": "projects/SCL/v1/Panthera_tigris/zones_img",
+            "static": True,
+        },
     }
     thresholds = {
         "structural_habitat": 0.5,
@@ -107,9 +112,9 @@ class SCLPolygons(SCLTask):
         )
         self.water = ee.Image(self.inputs["water"]["ee_path"])
         self.zones = ee.FeatureCollection(self.inputs["zones"]["ee_path"])
-        self.zones_image = self.zones.reduceToImage(
-            [self.ZONES_LABEL], ee.Reducer.first()
-        ).selfMask()
+        self.zones_image = ee.Image(
+            self.inputs["zones_image"]["ee_path"]
+        )  # TODO: systemize creation/storage of zones_image
 
         self.scl_poly_filters = {
             "scl_species": ee.Filter.And(
@@ -226,7 +231,6 @@ class SCLPolygons(SCLTask):
                     scale=self.scale,
                     crs=self.crs,
                     maxPixels=self.ee_max_pixels,
-                    tileScale=16,
                 )
             ).get("groups")
         )
