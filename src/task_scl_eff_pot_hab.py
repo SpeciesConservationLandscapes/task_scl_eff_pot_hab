@@ -6,7 +6,6 @@ from task_base import SCLTask
 
 class SCLPolygons(SCLTask):
     scale = 1000
-    ZONES_LABEL = "Biome_zone"
     inputs = {
         "structural_habitat": {
             "ee_type": SCLTask.IMAGECOLLECTION,
@@ -52,9 +51,9 @@ class SCLPolygons(SCLTask):
             "ee_path": "projects/SCL/v1/Panthera_tigris/biome_density",
             "static": True,
         },
-        "zones": {
-            "ee_type": SCLTask.FEATURECOLLECTION,
-            "ee_path": "projects/SCL/v1/Panthera_tigris/zones",
+        "zones_image": {
+            "ee_type": SCLTask.IMAGE,
+            "ee_path": "projects/SCL/v1/Panthera_tigris/zones_img",
             "static": True,
         },
     }
@@ -106,10 +105,7 @@ class SCLPolygons(SCLTask):
             self.inputs["density"]["ee_path"]
         )
         self.water = ee.Image(self.inputs["water"]["ee_path"])
-        self.zones = ee.FeatureCollection(self.inputs["zones"]["ee_path"])
-        self.zones_image = self.zones.reduceToImage(
-            [self.ZONES_LABEL], ee.Reducer.first()
-        ).selfMask()
+        self.zones_image = ee.Image(self.inputs["zones_image"]["ee_path"])
 
         self.scl_poly_filters = {
             "scl_species": ee.Filter.And(
@@ -226,7 +222,6 @@ class SCLPolygons(SCLTask):
                     scale=self.scale,
                     crs=self.crs,
                     maxPixels=self.ee_max_pixels,
-                    tileScale=16,
                 )
             ).get("groups")
         )
