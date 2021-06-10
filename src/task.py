@@ -472,9 +472,14 @@ class SCLPolygons(SCLTask):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("-d", "--taskdate", default=datetime.now(timezone.utc).date())
-    parser.add_argument("-s", "--species", default="Panthera_tigris")
-    parser.add_argument("--scenario", default=SCLTask.CANONICAL)
+    parser.add_argument("-d", "--taskdate")
+    parser.add_argument("-s", "--species")
+    parser.add_argument("--scenario")
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="overwrite existing outputs instead of incrementing",
+    )
     options = parser.parse_args()
     sclstats_task = SCLPolygons(**vars(options))
     sclstats_task.run()
