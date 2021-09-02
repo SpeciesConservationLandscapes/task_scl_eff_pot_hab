@@ -61,7 +61,11 @@ class SCLPolygons(SCLTask):
         "structural_habitat": 0.5,
         "reduce_res_input_pixels": 0.5,
         "structural_habitat_patch_size": 5,  # sq km
-        "hii": 18,  # TODO: use this as a default value, if dynamic thresholding fails
+        "hii": {
+            "zone_1": 10,
+            "zone_2": 10,
+            "zone_3": 10,
+        },  # TODO: use this as a default value, if dynamic thresholding fails
         "probability": 1,  # TODO: probability threshold may change based on final probability format
         "connectivity_distance": 2,  # km (1/2 of actual dispersal distance)
         "landscape_size": 3,
@@ -99,8 +103,12 @@ class SCLPolygons(SCLTask):
             ee.ImageCollection(self.inputs["hii"]["ee_path"])
         )
         self.historic_range = ee.Image(self.inputs["historic_range"]["ee_path"])
-        self.extirpated_range = ee.Image(self.inputs["extirpated_range"]["ee_path"])
-        self.ecoregions = ee.FeatureCollection(self.inputs["ecoregions"]["ee_path"])
+        self.extirpated_range = ee.Image(
+            self.inputs["extirpated_range"]["ee_path"]
+        )
+        self.ecoregions = ee.FeatureCollection(
+            self.inputs["ecoregions"]["ee_path"]
+        )
         self.density, density_date = self.get_most_recent_featurecollection(
             self.inputs["density"]["ee_path"]
         )
@@ -111,8 +119,12 @@ class SCLPolygons(SCLTask):
             "scl_species": ee.Filter.And(
                 ee.Filter.gte("size", self.thresholds["landscape_size"]),
                 ee.Filter.eq("range", self.thresholds["current_range"]),
-                ee.Filter.gte("probability", self.thresholds["landscape_probability"]),
-                ee.Filter.gte("effort", self.thresholds["landscape_survey_effort"]),
+                ee.Filter.gte(
+                    "probability", self.thresholds["landscape_probability"]
+                ),
+                ee.Filter.gte(
+                    "effort", self.thresholds["landscape_survey_effort"]
+                ),
             ),
             "scl_restoration": ee.Filter.Or(
                 ee.Filter.And(
@@ -121,7 +133,9 @@ class SCLPolygons(SCLTask):
                     ee.Filter.lt(
                         "probability", self.thresholds["landscape_probability"]
                     ),
-                    ee.Filter.gte("effort", self.thresholds["landscape_survey_effort"]),
+                    ee.Filter.gte(
+                        "effort", self.thresholds["landscape_survey_effort"]
+                    ),
                 ),
                 ee.Filter.And(
                     ee.Filter.gte("size", self.thresholds["landscape_size"]),
@@ -131,14 +145,22 @@ class SCLPolygons(SCLTask):
             "scl_survey": ee.Filter.And(
                 ee.Filter.gte("size", self.thresholds["landscape_size"]),
                 ee.Filter.eq("range", self.thresholds["current_range"]),
-                ee.Filter.gte("probability", self.thresholds["landscape_probability"]),
-                ee.Filter.lt("effort", self.thresholds["landscape_survey_effort"]),
+                ee.Filter.gte(
+                    "probability", self.thresholds["landscape_probability"]
+                ),
+                ee.Filter.lt(
+                    "effort", self.thresholds["landscape_survey_effort"]
+                ),
             ),
             "scl_fragment": ee.Filter.And(
                 ee.Filter.lt("size", self.thresholds["landscape_size"]),
                 ee.Filter.eq("range", self.thresholds["current_range"]),
-                ee.Filter.gte("probability", self.thresholds["landscape_probability"]),
-                ee.Filter.gte("effort", self.thresholds["landscape_survey_effort"]),
+                ee.Filter.gte(
+                    "probability", self.thresholds["landscape_probability"]
+                ),
+                ee.Filter.gte(
+                    "effort", self.thresholds["landscape_survey_effort"]
+                ),
             ),
         }
 
@@ -165,7 +187,9 @@ class SCLPolygons(SCLTask):
             ee.Algorithms.If(
                 med_density_biome.gt(0),
                 med_density_biome,
-                ee.Algorithms.If(med_density_eco_biome.gt(0), med_density_eco_biome, 1),
+                ee.Algorithms.If(
+                    med_density_eco_biome.gt(0), med_density_eco_biome, 1
+                ),
             ),
         )
         min_core_size = (
@@ -260,15 +284,19 @@ class SCLPolygons(SCLTask):
                 proportion_high = frequency_high.divide(pixel_count_high)
                 difference = proportion_high.subtract(proportion_all)
                 # if difference is gte to 0, returns bin value; if difference is < 0, returns 0
-                return ee.Number(bin_value.multiply(difference.gte(0))).int()
+                return bin_value.multiply(difference.gte(0)).int()
 
             # returns the maximum bin value with a positive proportional difference
-            threshold = histogram_combine.map(threshold_calc).reduce(ee.Reducer.max())
+            threshold = histogram_combine.map(threshold_calc).reduce(
+                ee.Reducer.max()
+            )
             return [zone_number, threshold]
 
         # converts [[zone_number, threshold],...] to [[zone_number,...], [threshold,...]]
         zone_threshold_list = (
-            ee.Array(zone_histogram_objects.map(histogram_format)).transpose().toList()
+            ee.Array(zone_histogram_objects.map(histogram_format))
+            .transpose()
+            .toList()
         )
         # TODO: 1. identify and handle edge cases; 2. return default value if thresholding fails
         return zone_threshold_list
@@ -297,20 +325,32 @@ class SCLPolygons(SCLTask):
             .reproject(self.crs, None, str_hab_resolution)
         )
 
-        hii_thresholding_image = self.build_threshold_calc_image(
-            self.hii,
-            str_hab_mask,  # TODO: replace str_hab_mask with probability when available
-            "HII",
+        # hii_thresholding_image = self.build_threshold_calc_image(
+        #     self.hii,
+        #     str_hab_mask,  # TODO: replace str_hab_mask with probability when available
+        #     "HII",
+        # )
+        #
+        # hii_thresholding_histograms = self.histogram_calc(
+        #     hii_thresholding_image, self.histogram_reducer(0, 100, 100),
+        # )
+        #
+        # hii_threshold_values = self.zone_threshold_calc(
+        #     hii_thresholding_histograms
+        # )
+        #
+        # hii_threshold_image = self.zone_threshold_image(
+        #     hii_threshold_values, "HII"
+        # )
+
+        hii_threshold_image = self.zones_image.remap(
+            [1, 2, 3],
+            [
+                self.thresholds["hii"]["zone_1"],
+                self.thresholds["hii"]["zone_2"],
+                self.thresholds["hii"]["zone_3"],
+            ],
         )
-
-        hii_thresholding_histograms = self.histogram_calc(
-            hii_thresholding_image,
-            self.histogram_reducer(0, 100, 100),
-        )
-
-        hii_threshold_values = self.zone_threshold_calc(hii_thresholding_histograms)
-
-        hii_threshold_image = self.zone_threshold_image(hii_threshold_values, "HII")
 
         low_hii_mask = self.hii.lte(hii_threshold_image).selfMask()
 
@@ -370,25 +410,21 @@ class SCLPolygons(SCLTask):
         min_patch_size = (
             ecoregion_image.remap(ecoregion_id, core_size)
             .int()
-            .clamp(
-                min_core_pixels,
-                max_core_pixels,
-            )
+            .clamp(min_core_pixels, max_core_pixels,)
             .updateMask(potential_habitat)
         )
 
         min_stepping_stone_size = (
             min_patch_size.multiply(self.density_values["core_to_step_ratio"])
             .int()
-            .clamp(
-                min_step_pixels,
-                max_step_pixels,
-            )
+            .clamp(min_step_pixels, max_step_pixels,)
             .updateMask(potential_habitat)
         )
 
         potential_core = (
-            ee.Image(0).where(potential_habitat.gte(min_patch_size), 1).selfMask()
+            ee.Image(0)
+            .where(potential_habitat.gte(min_patch_size), 1)
+            .selfMask()
         )
 
         potential_stepping_stone = (
@@ -403,7 +439,9 @@ class SCLPolygons(SCLTask):
         )
 
         potential_core = (
-            self.dilate(potential_core, self.thresholds["connectivity_distance"])
+            self.dilate(
+                potential_core, self.thresholds["connectivity_distance"]
+            )
             .reproject(crs=self.crs, scale=self.scale)
             .multiply(3)
             .unmask(0)
@@ -411,7 +449,8 @@ class SCLPolygons(SCLTask):
         )
         potential_stepping_stone = (
             self.dilate(
-                potential_stepping_stone, self.thresholds["connectivity_distance"]
+                potential_stepping_stone,
+                self.thresholds["connectivity_distance"],
             )
             .reproject(crs=self.crs, scale=self.scale)
             .unmask(0)
@@ -422,7 +461,9 @@ class SCLPolygons(SCLTask):
 
         # TODO: the probability threshold process will change with final version of probability
         probability_thresh = (
-            self.probability.add(1).gte(self.thresholds["probability"]).selfMask()
+            self.probability.add(1)
+            .gte(self.thresholds["probability"])
+            .selfMask()
         )
 
         historic = self.historic_range.unmask(0)
@@ -440,7 +481,9 @@ class SCLPolygons(SCLTask):
         scl_polys = (
             ee.Image(1)
             .updateMask(scl_polys)
-            .addBands([scl_polys, range_binary, probability_thresh, survey_effort])
+            .addBands(
+                [scl_polys, range_binary, probability_thresh, survey_effort]
+            )
             .rename(["scl_poly", "size", "range", "probability", "effort"])
             .reduceToVectors(
                 reducer=ee.Reducer.max(),  # TODO: may need to consider a unique reducer for each band to delineate polygons
@@ -455,7 +498,9 @@ class SCLPolygons(SCLTask):
 
         scl_survey = scl_polys.filter(self.scl_poly_filters["scl_survey"])
 
-        scl_restoration = scl_polys.filter(self.scl_poly_filters["scl_restoration"])
+        scl_restoration = scl_polys.filter(
+            self.scl_poly_filters["scl_restoration"]
+        )
 
         scl_fragment = scl_polys.filter(self.scl_poly_filters["scl_fragment"])
 
