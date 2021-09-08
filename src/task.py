@@ -3,7 +3,7 @@ import ee
 from task_base import SCLTask
 
 
-class SCLPolygons(SCLTask):
+class SCLEffectivePotentialHabitat(SCLTask):
     scale = 1000
     inputs = {
         "structural_habitat": {
@@ -233,5 +233,5 @@ if __name__ == "__main__":
         help="overwrite existing outputs instead of incrementing",
     )
     options = parser.parse_args()
-    sclstats_task = SCLPolygons(**vars(options))
-    sclstats_task.run()
+    effpothab_task = SCLEffectivePotentialHabitat(**vars(options))
+    effpothab_task.run()
