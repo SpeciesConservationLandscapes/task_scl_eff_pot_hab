@@ -64,6 +64,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
         self.hii, _ = self.get_most_recent_image(
             ee.ImageCollection(self.inputs["hii"]["ee_path"])
         )
+        print(self.hii.getInfo())
         self.ecoregions = ee.FeatureCollection(self.inputs["ecoregions"]["ee_path"])
         self.density = ee.FeatureCollection(self.inputs["density"]["ee_path"])
         self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
@@ -117,6 +118,17 @@ class SCLEffectivePotentialHabitat(SCLTask):
             self.thresholds["structural_habitat"]
         ).selfMask()
 
+        str_hab_resolution = self.structural_habitat.projection().nominalScale()
+        str_hab_connected_pixels = self.area_km_to_pixels(
+            self.thresholds["structural_habitat_patch_size"], str_hab_resolution
+        )
+        connected_structural_habitat = (
+            structural_habitat_mask.connectedPixelCount(str_hab_connected_pixels, True)
+            .gte(str_hab_connected_pixels)
+            .selfMask()
+            .reproject(self.crs, None, str_hab_resolution)
+        )
+
         hii_threshold_image = self.zones_image.remap(
             [1, 2, 3],
             [
@@ -130,6 +142,15 @@ class SCLEffectivePotentialHabitat(SCLTask):
         eff_pot_hab = (
             structural_habitat_mask.updateMask(low_hii_mask)
             .rename("eff_pot_hab")
+            .unmask(0)
+            .reduceResolution(ee.Reducer.mean())
+            .gte(self.thresholds["reduce_res_input_pixels"])
+            .selfMask()
+            .rename("eff_pot_hab")
+        )
+
+        eff_pot_hab_export = (
+            connected_structural_habitat.updateMask(low_hii_mask)
             .unmask(0)
             .reduceResolution(ee.Reducer.mean())
             .gte(self.thresholds["reduce_res_input_pixels"])
@@ -216,7 +237,20 @@ class SCLEffectivePotentialHabitat(SCLTask):
         )
 
         allpotential = ee.Image(1).updateMask(potential_core.add(potential_stepping_stone).selfMask())
-        self.export_image_ee(allpotential, "pothab/potential_habitat")
+        scl_polys = (
+            allpotential
+            .addBands([allpotential])
+            .rename(["scl_poly", "size"])
+            .reduceToVectors(
+                reducer=ee.Reducer.max(),
+                geometry=ee.Geometry.Polygon(self.extent),
+                scale=self.scale,
+                crs=self.crs,
+                maxPixels=self.ee_max_pixels,
+            )
+        )
+        self.export_fc_ee(scl_polys, "pothab/scl_polys")
+        self.export_image_ee(eff_pot_hab_export, "pothab/potential_habitat")
 
     def check_inputs(self):
         super().check_inputs()
