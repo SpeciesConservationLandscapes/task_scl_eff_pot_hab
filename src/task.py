@@ -42,11 +42,11 @@ class SCLEffectivePotentialHabitat(SCLTask):
         "reduce_res_input_pixels": 0.5,
         "structural_habitat_patch_size": 5,  # sq km
         "hii": {
-            "zone_1": 14,
+            "zone_1": 18,
             "zone_2": 8,
-            "zone_3": 12,
-        },  # TODO: replace with dynamic thresholding that handles local minima
-        "connectivity_distance": 2,  # km (1/2 of actual dispersal distance)
+            "zone_3": 5,
+        },  # TODO: possibly replace with dynamic thresholding
+        "connectivity_distance": 4,
     }
     density_values = {
         "n_core_animals": 5,
@@ -65,7 +65,9 @@ class SCLEffectivePotentialHabitat(SCLTask):
             ee.ImageCollection(self.inputs["hii"]["ee_path"])
         )
         print(self.hii.getInfo())
-        self.ecoregions = ee.FeatureCollection(self.inputs["ecoregions"]["ee_path"])
+        self.ecoregions = ee.FeatureCollection(
+            self.inputs["ecoregions"]["ee_path"]
+        )
         self.density = ee.FeatureCollection(self.inputs["density"]["ee_path"])
         self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
         self.zones_image = ee.Image(self.inputs["zones_image"]["ee_path"])
@@ -93,7 +95,9 @@ class SCLEffectivePotentialHabitat(SCLTask):
             ee.Algorithms.If(
                 med_density_biome.gt(0),
                 med_density_biome,
-                ee.Algorithms.If(med_density_eco_biome.gt(0), med_density_eco_biome, 1),
+                ee.Algorithms.If(
+                    med_density_eco_biome.gt(0), med_density_eco_biome, 1
+                ),
             ),
         )
         min_core_size = (
@@ -123,7 +127,9 @@ class SCLEffectivePotentialHabitat(SCLTask):
             self.thresholds["structural_habitat_patch_size"], str_hab_resolution
         )
         connected_structural_habitat = (
-            structural_habitat_mask.connectedPixelCount(str_hab_connected_pixels, True)
+            structural_habitat_mask.connectedPixelCount(
+                str_hab_connected_pixels, True
+            )
             .gte(str_hab_connected_pixels)
             .selfMask()
             .reproject(self.crs, None, str_hab_resolution)
@@ -137,11 +143,10 @@ class SCLEffectivePotentialHabitat(SCLTask):
                 self.thresholds["hii"]["zone_3"],
             ],
         )
-        low_hii_mask = self.hii.lte(hii_threshold_image).selfMask()
+        low_hii_mask = self.hii.divide(100).lte(hii_threshold_image).selfMask()
 
         eff_pot_hab = (
             structural_habitat_mask.updateMask(low_hii_mask)
-            .rename("eff_pot_hab")
             .unmask(0)
             .reduceResolution(ee.Reducer.mean())
             .gte(self.thresholds["reduce_res_input_pixels"])
@@ -189,56 +194,57 @@ class SCLEffectivePotentialHabitat(SCLTask):
         min_patch_size = (
             ecoregion_image.remap(ecoregion_id, core_size)
             .int()
-            .clamp(
-                min_core_pixels,
-                max_core_pixels,
-            )
+            .clamp(min_core_pixels, max_core_pixels,)
             .updateMask(potential_habitat)
         )
         min_stepping_stone_size = (
             min_patch_size.multiply(self.density_values["core_to_step_ratio"])
             .int()
-            .clamp(
-                min_step_pixels,
-                max_step_pixels,
-            )
+            .clamp(min_step_pixels, max_step_pixels,)
             .updateMask(potential_habitat)
         )
 
         potential_core = (
-            ee.Image(0).where(potential_habitat.gte(min_patch_size), 1).selfMask()
-        )
-        potential_stepping_stone = (
-            ee.Image(0)
-            .where(
-                potential_habitat.lt(min_patch_size).And(
-                    potential_habitat.gte(min_stepping_stone_size)
-                ),
-                1,
+            self.dilate(
+                ee.Image(0)
+                .where(potential_habitat.gte(min_patch_size), 1)
+                .selfMask(),
+                self.thresholds["connectivity_distance"] / 2,
             )
-            .selfMask()
-        )
-
-        potential_core = (
-            self.dilate(potential_core, self.thresholds["connectivity_distance"])
             .reproject(crs=self.crs, scale=self.scale)
             .multiply(3)
             .unmask(0)
             .updateMask(self.watermask)
         )
+
         potential_stepping_stone = (
             self.dilate(
-                potential_stepping_stone,
-                self.thresholds["connectivity_distance"],
+                ee.Image(0)
+                .where(
+                    potential_habitat.lt(min_patch_size).And(
+                        potential_habitat.gte(min_stepping_stone_size)
+                    ),
+                    1,
+                )
+                .selfMask(),
+                self.thresholds["connectivity_distance"] / 2,
             )
             .reproject(crs=self.crs, scale=self.scale)
             .unmask(0)
             .updateMask(self.watermask)
         )
 
-        allpotential = ee.Image(1).updateMask(potential_core.add(potential_stepping_stone).selfMask())
+        allpotential = potential_core.add(potential_stepping_stone).selfMask()
+
+        #  Possible values for size reducer
+        # 1: potential stepping stone
+        # 2: potential stepping stone (stepping stone overlapping stepping stone)
+        # 3: potential core
+        # 4: potential core (core overlapping stepping stone)
+        # 6: potential core (core overlapping core)
         scl_polys = (
-            allpotential
+            ee.Image(1)
+            .updateMask(allpotential)
             .addBands([allpotential])
             .rename(["scl_poly", "size"])
             .reduceToVectors(
@@ -251,6 +257,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
         )
         self.export_fc_ee(scl_polys, "pothab/scl_polys")
         self.export_image_ee(eff_pot_hab_export, "pothab/potential_habitat")
+        print(self.extent)
 
     def check_inputs(self):
         super().check_inputs()
