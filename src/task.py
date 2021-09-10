@@ -46,7 +46,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
             "zone_2": 8,
             "zone_3": 5,
         },  # TODO: possibly replace with dynamic thresholding
-        "connectivity_distance": 4,
+        "dispersal_distance": 4,
     }
     density_values = {
         "n_core_animals": 5,
@@ -60,11 +60,11 @@ class SCLEffectivePotentialHabitat(SCLTask):
         self.structural_habitat, _ = self.get_most_recent_image(
             ee.ImageCollection(self.inputs["structural_habitat"]["ee_path"])
         )
-        print(self.structural_habitat.getInfo())
+
         self.hii, _ = self.get_most_recent_image(
             ee.ImageCollection(self.inputs["hii"]["ee_path"])
         )
-        print(self.hii.getInfo())
+
         self.ecoregions = ee.FeatureCollection(
             self.inputs["ecoregions"]["ee_path"]
         )
@@ -204,12 +204,14 @@ class SCLEffectivePotentialHabitat(SCLTask):
             .updateMask(potential_habitat)
         )
 
+        connectivity_distance = self.thresholds["dispersal_distance"] / 2
+
         potential_core = (
             self.dilate(
                 ee.Image(0)
                 .where(potential_habitat.gte(min_patch_size), 1)
                 .selfMask(),
-                self.thresholds["connectivity_distance"] / 2,
+                connectivity_distance,
             )
             .reproject(crs=self.crs, scale=self.scale)
             .multiply(3)
@@ -227,7 +229,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
                     1,
                 )
                 .selfMask(),
-                self.thresholds["connectivity_distance"] / 2,
+                connectivity_distance,
             )
             .reproject(crs=self.crs, scale=self.scale)
             .unmask(0)
@@ -257,7 +259,6 @@ class SCLEffectivePotentialHabitat(SCLTask):
         )
         self.export_fc_ee(scl_polys, "pothab/scl_polys")
         self.export_image_ee(eff_pot_hab_export, "pothab/potential_habitat")
-        print(self.extent)
 
     def check_inputs(self):
         super().check_inputs()
