@@ -4,6 +4,7 @@ from task_base import SCLTask
 
 
 class SCLEffectivePotentialHabitat(SCLTask):
+    BIOME_ZONE_LABEL = "Zone"
     scale = 1000
     inputs = {
         "structural_habitat": {
@@ -31,9 +32,9 @@ class SCLEffectivePotentialHabitat(SCLTask):
             "ee_path": "projects/HII/v1/source/phys/watermask_jrc70_cciocean",
             "static": True,
         },
-        "zones_image": {
-            "ee_type": SCLTask.IMAGE,
-            "ee_path": "projects/SCL/v1/Panthera_tigris/zones_img",
+        "zones": {
+            "ee_type": SCLTask.FEATURECOLLECTION,
+            "ee_path": "projects/SCL/v1/Panthera_tigris/zones",
             "static": True,
         },
     }
@@ -44,7 +45,8 @@ class SCLEffectivePotentialHabitat(SCLTask):
         "hii": {
             "zone_1": 18,
             "zone_2": 8,
-            "zone_3": 5,
+            "zone_3": 6,
+            "zone_4": 6,
         },  # TODO: possibly replace with dynamic thresholding
         "dispersal_distance": 4,
     }
@@ -70,7 +72,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
         )
         self.density = ee.FeatureCollection(self.inputs["density"]["ee_path"])
         self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
-        self.zones_image = ee.Image(self.inputs["zones_image"]["ee_path"])
+        self.zones = ee.FeatureCollection(self.inputs["zones"]["ee_path"])
 
     def distance_km_to_pixels(self, distance_km, image_resolution):
         image_resolution = ee.Number(image_resolution)
@@ -135,14 +137,20 @@ class SCLEffectivePotentialHabitat(SCLTask):
             .reproject(self.crs, None, str_hab_resolution)
         )
 
-        hii_threshold_image = self.zones_image.remap(
-            [1, 2, 3],
+        zone_image = self.zones.reduceToImage(
+            [self.BIOME_ZONE_LABEL], ee.Reducer.first()
+        )
+
+        hii_threshold_image = zone_image.remap(
+            [1, 2, 3, 4],
             [
                 self.thresholds["hii"]["zone_1"],
                 self.thresholds["hii"]["zone_2"],
                 self.thresholds["hii"]["zone_3"],
+                self.thresholds["hii"]["zone_4"],
             ],
         )
+
         low_hii_mask = self.hii.divide(100).lte(hii_threshold_image).selfMask()
 
         eff_pot_hab = (
