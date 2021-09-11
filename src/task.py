@@ -4,6 +4,7 @@ from task_base import SCLTask
 
 
 class SCLEffectivePotentialHabitat(SCLTask):
+    BIOME_ZONE_LABEL = "Zone"
     scale = 1000
     inputs = {
         "structural_habitat": {
@@ -136,7 +137,9 @@ class SCLEffectivePotentialHabitat(SCLTask):
             .reproject(self.crs, None, str_hab_resolution)
         )
 
-        zone_image = self.zones.reduceToImage(["Zone"], ee.Reducer.first())
+        zone_image = self.zones.reduceToImage(
+            [self.BIOME_ZONE_LABEL], ee.Reducer.first()
+        )
 
         hii_threshold_image = zone_image.remap(
             [1, 2, 3, 4],
