@@ -17,6 +17,16 @@ class SCLEffectivePotentialHabitat(SCLTask):
             "ee_path": "projects/HII/v1/hii",
             "maxage": 1,
         },
+        "historic_range": {
+            "ee_type": SCLTask.IMAGE,
+            "ee_path": "historical_range_path",
+            "static": True,
+        },
+        "extirpated_range": {
+            "ee_type": SCLTask.IMAGE,
+            "ee_path": "extirpated_range_path",
+            "static": True,
+        },
         "ecoregions": {
             "ee_type": SCLTask.FEATURECOLLECTION,
             "ee_path": "RESOLVE/ECOREGIONS/2017",
@@ -73,6 +83,23 @@ class SCLEffectivePotentialHabitat(SCLTask):
         self.density = ee.FeatureCollection(self.inputs["density"]["ee_path"])
         self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
         self.zones = ee.FeatureCollection(self.inputs["zones"]["ee_path"])
+
+        self.historic_range = (
+            ee.FeatureCollection(self.inputs["historic_range"]["ee_path"])
+            .reduceToImage(["TCL_histor"], ee.Reducer.first())
+            .unmask(0)
+        )
+        self.extirpated_range = (
+            ee.FeatureCollection(self.inputs["extirpated_range"]["ee_path"])
+            .reduceToImage(["TCL_extirp"], ee.Reducer.first())
+            .unmask(0)
+        )
+
+    def historical_range_path(self):
+        return f"{self.speciesdir}/historical_range"
+
+    def extirpated_range_path(self):
+        return f"{self.speciesdir}/extirpated_range"
 
     def distance_km_to_pixels(self, distance_km, image_resolution):
         image_resolution = ee.Number(image_resolution)
@@ -246,7 +273,15 @@ class SCLEffectivePotentialHabitat(SCLTask):
 
         allpotential = potential_core.add(potential_stepping_stone).selfMask()
 
-        #  Possible values for size reducer
+        # 0: neither historic or extirpated range
+        # 1: extirpated
+        # 2: historic
+        range_class = (
+            ee.Image(0)
+            .where(self.historic_range.eq(1), ee.Image(2))
+            .where(self.extirpated_range.eq(1), ee.Image(1))
+        ).selfMask()
+
         # 1: potential stepping stone
         # 2: potential stepping stone (stepping stone overlapping stepping stone)
         # 3: potential core
@@ -255,10 +290,10 @@ class SCLEffectivePotentialHabitat(SCLTask):
         scl_polys = (
             ee.Image(1)
             .updateMask(allpotential)
-            .addBands([allpotential])
-            .rename(["scl_poly", "size"])
+            .addBands([allpotential, range_class])
+            .rename(["scl_poly", "size", "range"])
             .reduceToVectors(
-                reducer=ee.Reducer.max(),
+                reducer=ee.Reducer.mode(),
                 geometry=ee.Geometry.Polygon(self.extent),
                 scale=self.scale,
                 crs=self.crs,
