@@ -83,9 +83,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
         )
 
         self.countries = ee.FeatureCollection(self.inputs["countries"]["ee_path"])
-        self.ecoregions = ee.FeatureCollection(
-            self.inputs["ecoregions"]["ee_path"]
-        )
+        self.ecoregions = ee.FeatureCollection(self.inputs["ecoregions"]["ee_path"])
         self.density = ee.FeatureCollection(self.inputs["density"]["ee_path"])
         self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
         self.zones = ee.FeatureCollection(self.inputs["zones"]["ee_path"])
@@ -126,11 +124,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
         density_val = ee.Algorithms.If(
             med_density_eco.gt(0),
             med_density_eco,
-            ee.Algorithms.If(
-                med_density_biome.gt(0),
-                med_density_biome,
-                1
-            ),
+            ee.Algorithms.If(med_density_biome.gt(0), med_density_biome, 1),
         )
         min_core_size = (
             ee.Number(self.density_values["n_core_animals"])
@@ -138,10 +132,11 @@ class SCLEffectivePotentialHabitat(SCLTask):
             .multiply(100)
             .int()
         )
-        min_core_size_pixels = self.area_km_to_pixels(min_core_size, self.scale)
+        # min_core_size_pixels = self.area_km_to_pixels(min_core_size, self.scale)
+        # return km2 required to be a patch
         return ee.Feature(
             None,
-            {"ECO_ID": ft.get("ECO_ID"), "min_core_size": min_core_size_pixels},
+            {"ECO_ID": ft.get("ECO_ID"), "min_core_size": min_core_size},
         )
 
     def dilate(self, image, distance):
@@ -159,9 +154,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
             self.thresholds["structural_habitat_patch_size"], str_hab_resolution
         )
         connected_structural_habitat = (
-            structural_habitat_mask.connectedPixelCount(
-                str_hab_connected_pixels, True
-            )
+            structural_habitat_mask.connectedPixelCount(str_hab_connected_pixels, True)
             .gte(str_hab_connected_pixels)
             .selfMask()
             .reproject(self.crs, None, str_hab_resolution)
@@ -235,13 +228,19 @@ class SCLEffectivePotentialHabitat(SCLTask):
         min_patch_size = (
             ecoregion_image.remap(ecoregion_id, core_size)
             .int()
-            .clamp(min_core_pixels, max_core_pixels,)
+            .clamp(
+                min_core_pixels,
+                max_core_pixels,
+            )
             .updateMask(potential_habitat)
         )
         min_stepping_stone_size = (
             min_patch_size.multiply(self.density_values["core_to_step_ratio"])
             .int()
-            .clamp(min_step_pixels, max_step_pixels,)
+            .clamp(
+                min_step_pixels,
+                max_step_pixels,
+            )
             .updateMask(potential_habitat)
         )
 
@@ -249,9 +248,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
 
         potential_core = (
             self.dilate(
-                ee.Image(0)
-                .where(potential_habitat.gte(min_patch_size), 1)
-                .selfMask(),
+                ee.Image(0).where(potential_habitat.gte(min_patch_size), 1).selfMask(),
                 connectivity_distance,
             )
             .reproject(crs=self.crs, scale=self.scale)
@@ -288,22 +285,52 @@ class SCLEffectivePotentialHabitat(SCLTask):
             .where(self.extirpated_range.eq(1), ee.Image(1))
         ).selfMask()
 
+        area = ee.Image.pixelArea().divide(1000000).int().updateMask(self.watermask)
+        eff_pot_hab_area = area.updateMask(eff_pot_hab)
+        potential_habitat_area = area.updateMask(potential_habitat)
+
         # 1: potential stepping stone
         # 2: potential stepping stone (stepping stone overlapping stepping stone)
         # 3: potential core
         # 4: potential core (core overlapping stepping stone)
         # 6: potential core (core overlapping core)
         scl_polys = (
-            eco_country
-            .updateMask(allpotential)
-            .addBands([allpotential, range_class])
-            .rename(["scl_poly", "size", "range"])
+            eco_country.updateMask(allpotential)
+            .addBands(
+                [
+                    allpotential,
+                    range_class,
+                    country_image.divide(1000),
+                    ecoregion_image,
+                    min_patch_size,
+                    min_stepping_stone_size,
+                    area,
+                    eff_pot_hab_area,
+                    potential_habitat_area,
+                ]
+            )
+            .rename(
+                [
+                    "scl_poly",
+                    "size",
+                    "range",
+                    "country",
+                    "ecoregion",
+                    "min_patch_size",
+                    "min_stepping_stone_size",
+                    "polygon_area",
+                    "eff_pot_hab_area",
+                    "connected_eff_pot_hab_area",
+                ]
+            )
+            .int()
             .reduceToVectors(
-                reducer=ee.Reducer.mode(),
+                reducer=ee.Reducer.mode().repeat(6).combine(ee.Reducer.sum().repeat(3)),
                 geometry=ee.Geometry.Polygon(self.extent),
                 scale=self.scale,
                 crs=self.crs,
                 maxPixels=self.ee_max_pixels,
+                tileScale=8,
             )
         )
         self.export_fc_ee(scl_polys, "pothab/scl_polys")
