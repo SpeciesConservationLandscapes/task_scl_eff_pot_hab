@@ -34,7 +34,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
         },
         "density": {
             "ee_type": SCLTask.FEATURECOLLECTION,
-            "ee_path": "projects/SCL/v1/Panthera_tigris/biome_density/biome_density_2021-01-01",
+            "ee_path": "projects/SCL/v1/Panthera_tigris/biome_density/biome_density_2021-09-14",
             "static": True,
         },
         "watermask": {
@@ -117,16 +117,13 @@ class SCLEffectivePotentialHabitat(SCLTask):
     def density_to_patch_size(self, ft):
         med_density_eco = ee.Number(ft.get("MED_DENSITY_ECO"))
         med_density_biome = ee.Number(ft.get("MED_DENSITY_BIOME"))
-        med_density_eco_biome = ee.Number(ft.get("MED_DENSITY_ECO_BIOME"))
         density_val = ee.Algorithms.If(
             med_density_eco.gt(0),
             med_density_eco,
             ee.Algorithms.If(
                 med_density_biome.gt(0),
                 med_density_biome,
-                ee.Algorithms.If(
-                    med_density_eco_biome.gt(0), med_density_eco_biome, 1
-                ),
+                1
             ),
         )
         min_core_size = (
