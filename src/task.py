@@ -27,6 +27,11 @@ class SCLEffectivePotentialHabitat(SCLTask):
             "ee_path": "extirpated_range_path",
             "static": True,
         },
+        "countries": {
+            "ee_type": SCLTask.FEATURECOLLECTION,
+            "ee_path": "USDOS/LSIB/2017",
+            "static": True,
+        },
         "ecoregions": {
             "ee_type": SCLTask.FEATURECOLLECTION,
             "ee_path": "RESOLVE/ECOREGIONS/2017",
@@ -77,6 +82,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
             ee.ImageCollection(self.inputs["hii"]["ee_path"])
         )
 
+        self.countries = ee.FeatureCollection(self.inputs["countries"]["ee_path"])
         self.ecoregions = ee.FeatureCollection(
             self.inputs["ecoregions"]["ee_path"]
         )
@@ -215,10 +221,13 @@ class SCLEffectivePotentialHabitat(SCLTask):
             connected_potential_habitat.gte(min_step_pixels)
         ).selfMask()
 
+        country_image = self.countries.reduceToImage(
+            properties=["OBJECTID"], reducer=ee.Reducer.mode()
+        ).multiply(1000)
         ecoregion_image = self.ecoregions.reduceToImage(
             properties=["ECO_ID"], reducer=ee.Reducer.mode()
         )
-
+        eco_country = country_image.add(ecoregion_image)
         density = self.density.map(self.density_to_patch_size)
         ecoregion_id = density.aggregate_array("ECO_ID")
         core_size = density.aggregate_array("min_core_size")
@@ -285,7 +294,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
         # 4: potential core (core overlapping stepping stone)
         # 6: potential core (core overlapping core)
         scl_polys = (
-            ee.Image(1)
+            eco_country
             .updateMask(allpotential)
             .addBands([allpotential, range_class])
             .rename(["scl_poly", "size", "range"])
