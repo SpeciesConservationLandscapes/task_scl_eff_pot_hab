@@ -9,15 +9,10 @@ class SCLEffectivePotentialHabitat(SCLTask):
     inputs = {
         "structural_habitat": {
             "ee_type": SCLTask.IMAGECOLLECTION,
-            "ee_path": "projects/SCL/v1/Panthera_tigris/canonical/structural_habitat",
+            "ee_path": "structural_habitat_path",
             "maxage": 1,
         },
-        "hii": {
-            "ee_type": SCLTask.IMAGECOLLECTION,
-            "ee_path": "projects/HII/v1/hii",
-            "maxage": 1,
-        },
-        "historic_range": {
+        "historical_range": {
             "ee_type": SCLTask.IMAGE,
             "ee_path": "historical_range_path",
             "static": True,
@@ -27,24 +22,34 @@ class SCLEffectivePotentialHabitat(SCLTask):
             "ee_path": "extirpated_range_path",
             "static": True,
         },
+        "density": {
+            "ee_type": SCLTask.FEATURECOLLECTION,
+            "ee_path": "density_path",
+            "static": True,
+        },
+        "zones": {
+            "ee_type": SCLTask.FEATURECOLLECTION,
+            "ee_path": "zones_path",
+            "static": True,
+        },
+        "countries": {
+            "ee_type": SCLTask.FEATURECOLLECTION,
+            "ee_path": "USDOS/LSIB/2017",
+            "static": True,
+        },
         "ecoregions": {
             "ee_type": SCLTask.FEATURECOLLECTION,
             "ee_path": "RESOLVE/ECOREGIONS/2017",
             "static": True,
         },
-        "density": {
-            "ee_type": SCLTask.FEATURECOLLECTION,
-            "ee_path": "projects/SCL/v1/Panthera_tigris/biome_density/biome_density_2021-01-01",
-            "static": True,
+        "hii": {
+            "ee_type": SCLTask.IMAGECOLLECTION,
+            "ee_path": "projects/HII/v1/hii",
+            "maxage": 1,
         },
         "watermask": {
             "ee_type": SCLTask.IMAGE,
             "ee_path": "projects/HII/v1/source/phys/watermask_jrc70_cciocean",
-            "static": True,
-        },
-        "zones": {
-            "ee_type": SCLTask.FEATURECOLLECTION,
-            "ee_path": "projects/SCL/v1/Panthera_tigris/zones",
             "static": True,
         },
     }
@@ -72,34 +77,46 @@ class SCLEffectivePotentialHabitat(SCLTask):
         self.structural_habitat, _ = self.get_most_recent_image(
             ee.ImageCollection(self.inputs["structural_habitat"]["ee_path"])
         )
-
         self.hii, _ = self.get_most_recent_image(
             ee.ImageCollection(self.inputs["hii"]["ee_path"])
         )
 
-        self.ecoregions = ee.FeatureCollection(
-            self.inputs["ecoregions"]["ee_path"]
+        _historical_range = ee.FeatureCollection(
+            self.inputs["historical_range"]["ee_path"]
         )
-        self.density = ee.FeatureCollection(self.inputs["density"]["ee_path"])
-        self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
-        self.zones = ee.FeatureCollection(self.inputs["zones"]["ee_path"])
-
-        self.historic_range = (
-            ee.FeatureCollection(self.inputs["historic_range"]["ee_path"])
-            .reduceToImage(["TCL_histor"], ee.Reducer.first())
-            .unmask(0)
-        )
+        self.historical_range = _historical_range.reduceToImage(
+            ["TCL_histor"], ee.Reducer.first()
+        ).unmask(0)
         self.extirpated_range = (
             ee.FeatureCollection(self.inputs["extirpated_range"]["ee_path"])
             .reduceToImage(["TCL_extirp"], ee.Reducer.first())
             .unmask(0)
         )
 
+        self.countries = ee.FeatureCollection(
+            self.inputs["countries"]["ee_path"]
+        ).filterBounds(_historical_range.geometry())
+        self.ecoregions = ee.FeatureCollection(
+            self.inputs["ecoregions"]["ee_path"]
+        ).filterBounds(_historical_range.geometry())
+        self.density = ee.FeatureCollection(self.inputs["density"]["ee_path"])
+        self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
+        self.zones = ee.FeatureCollection(self.inputs["zones"]["ee_path"])
+
+    def structural_habitat_path(self):
+        return f"{self.ee_rootdir}/structural_habitat"
+
     def historical_range_path(self):
         return f"{self.speciesdir}/historical_range"
 
     def extirpated_range_path(self):
         return f"{self.speciesdir}/extirpated_range"
+
+    def density_path(self):
+        return f"{self.speciesdir}/biome_density/biome_density_2021-09-14"
+
+    def zones_path(self):
+        return f"{self.speciesdir}/zones"
 
     def distance_km_to_pixels(self, distance_km, image_resolution):
         image_resolution = ee.Number(image_resolution)
@@ -117,17 +134,10 @@ class SCLEffectivePotentialHabitat(SCLTask):
     def density_to_patch_size(self, ft):
         med_density_eco = ee.Number(ft.get("MED_DENSITY_ECO"))
         med_density_biome = ee.Number(ft.get("MED_DENSITY_BIOME"))
-        med_density_eco_biome = ee.Number(ft.get("MED_DENSITY_ECO_BIOME"))
         density_val = ee.Algorithms.If(
             med_density_eco.gt(0),
             med_density_eco,
-            ee.Algorithms.If(
-                med_density_biome.gt(0),
-                med_density_biome,
-                ee.Algorithms.If(
-                    med_density_eco_biome.gt(0), med_density_eco_biome, 1
-                ),
-            ),
+            ee.Algorithms.If(med_density_biome.gt(0), med_density_biome, 1),
         )
         min_core_size = (
             ee.Number(self.density_values["n_core_animals"])
@@ -135,10 +145,11 @@ class SCLEffectivePotentialHabitat(SCLTask):
             .multiply(100)
             .int()
         )
-        min_core_size_pixels = self.area_km_to_pixels(min_core_size, self.scale)
+        # min_core_size_pixels = self.area_km_to_pixels(min_core_size, self.scale)
+        # return km2 required to be a patch
         return ee.Feature(
             None,
-            {"ECO_ID": ft.get("ECO_ID"), "min_core_size": min_core_size_pixels},
+            {"ECO_ID": ft.get("ECO_ID"), "min_core_size": min_core_size},
         )
 
     def dilate(self, image, distance):
@@ -156,9 +167,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
             self.thresholds["structural_habitat_patch_size"], str_hab_resolution
         )
         connected_structural_habitat = (
-            structural_habitat_mask.connectedPixelCount(
-                str_hab_connected_pixels, True
-            )
+            structural_habitat_mask.connectedPixelCount(str_hab_connected_pixels, True)
             .gte(str_hab_connected_pixels)
             .selfMask()
             .reproject(self.crs, None, str_hab_resolution)
@@ -177,7 +186,6 @@ class SCLEffectivePotentialHabitat(SCLTask):
                 self.thresholds["hii"]["zone_4"],
             ],
         )
-
         low_hii_mask = self.hii.divide(100).lte(hii_threshold_image).selfMask()
 
         eff_pot_hab = (
@@ -188,7 +196,6 @@ class SCLEffectivePotentialHabitat(SCLTask):
             .selfMask()
             .rename("eff_pot_hab")
         )
-
         eff_pot_hab_export = (
             connected_structural_habitat.updateMask(low_hii_mask)
             .unmask(0)
@@ -218,10 +225,13 @@ class SCLEffectivePotentialHabitat(SCLTask):
             connected_potential_habitat.gte(min_step_pixels)
         ).selfMask()
 
+        country_image = self.countries.reduceToImage(
+            properties=["OBJECTID"], reducer=ee.Reducer.mode()
+        )
         ecoregion_image = self.ecoregions.reduceToImage(
             properties=["ECO_ID"], reducer=ee.Reducer.mode()
         )
-
+        eco_country = country_image.multiply(1000).add(ecoregion_image)
         density = self.density.map(self.density_to_patch_size)
         ecoregion_id = density.aggregate_array("ECO_ID")
         core_size = density.aggregate_array("min_core_size")
@@ -229,23 +239,26 @@ class SCLEffectivePotentialHabitat(SCLTask):
         min_patch_size = (
             ecoregion_image.remap(ecoregion_id, core_size)
             .int()
-            .clamp(min_core_pixels, max_core_pixels,)
+            .clamp(
+                min_core_pixels,
+                max_core_pixels,
+            )
             .updateMask(potential_habitat)
         )
         min_stepping_stone_size = (
             min_patch_size.multiply(self.density_values["core_to_step_ratio"])
             .int()
-            .clamp(min_step_pixels, max_step_pixels,)
+            .clamp(
+                min_step_pixels,
+                max_step_pixels,
+            )
             .updateMask(potential_habitat)
         )
 
         connectivity_distance = self.thresholds["dispersal_distance"] / 2
-
         potential_core = (
             self.dilate(
-                ee.Image(0)
-                .where(potential_habitat.gte(min_patch_size), 1)
-                .selfMask(),
+                ee.Image(0).where(potential_habitat.gte(min_patch_size), 1).selfMask(),
                 connectivity_distance,
             )
             .reproject(crs=self.crs, scale=self.scale)
@@ -253,7 +266,6 @@ class SCLEffectivePotentialHabitat(SCLTask):
             .unmask(0)
             .updateMask(self.watermask)
         )
-
         potential_stepping_stone = (
             self.dilate(
                 ee.Image(0)
@@ -273,33 +285,69 @@ class SCLEffectivePotentialHabitat(SCLTask):
 
         allpotential = potential_core.add(potential_stepping_stone).selfMask()
 
+        # range reclass:
         # 0: neither historic or extirpated range
         # 1: extirpated
-        # 2: historic
+        # 2: historical
         range_class = (
             ee.Image(0)
-            .where(self.historic_range.eq(1), ee.Image(2))
+            .where(self.historical_range.eq(1), ee.Image(2))
             .where(self.extirpated_range.eq(1), ee.Image(1))
         ).selfMask()
 
+        area = ee.Image.pixelArea().divide(1000000).updateMask(self.watermask)
+        eff_pot_hab_area = area.updateMask(eff_pot_hab)
+        potential_habitat_area = area.updateMask(potential_habitat)
+
+        # size reclass:
         # 1: potential stepping stone
         # 2: potential stepping stone (stepping stone overlapping stepping stone)
         # 3: potential core
         # 4: potential core (core overlapping stepping stone)
         # 6: potential core (core overlapping core)
-        scl_polys = (
-            ee.Image(1)
-            .updateMask(allpotential)
-            .addBands([allpotential, range_class])
-            .rename(["scl_poly", "size", "range"])
-            .reduceToVectors(
-                reducer=ee.Reducer.mode(),
-                geometry=ee.Geometry.Polygon(self.extent),
-                scale=self.scale,
-                crs=self.crs,
-                maxPixels=self.ee_max_pixels,
+
+        mode_bands = [
+            "size",
+            "range",
+            "country",
+            "ecoregion",
+            "min_patch_size",
+            "min_stepping_stone_size",
+        ]
+        sum_bands = [
+            "polygon_area",
+            "eff_pot_hab_area",
+            "connected_eff_pot_hab_area",
+        ]
+
+        scl_image = (
+            eco_country.updateMask(allpotential)
+            .addBands(
+                [
+                    allpotential,
+                    range_class,
+                    country_image,
+                    ecoregion_image,
+                    min_patch_size,
+                    min_stepping_stone_size,
+                    area,
+                    eff_pot_hab_area,
+                    potential_habitat_area,
+                ]
             )
+            .rename(["scl_poly"] + mode_bands + sum_bands)
         )
+        scl_polys = scl_image.reduceToVectors(
+            reducer=ee.Reducer.mode()
+            .forEach(mode_bands)
+            .combine(ee.Reducer.sum().forEach(sum_bands)),
+            geometry=ee.Geometry.Polygon(self.extent),
+            scale=self.scale,
+            crs=self.crs,
+            maxPixels=self.ee_max_pixels,
+            tileScale=8,
+        )
+
         self.export_fc_ee(scl_polys, "pothab/scl_polys")
         self.export_image_ee(eff_pot_hab_export, "pothab/potential_habitat")
 
