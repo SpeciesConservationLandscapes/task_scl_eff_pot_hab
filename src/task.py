@@ -299,15 +299,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
         eff_pot_hab_area = area.updateMask(eff_pot_hab)
         potential_habitat_area = area.updateMask(potential_habitat)
 
-        # size reclass:
-        # 1: potential stepping stone
-        # 2: potential stepping stone (stepping stone overlapping stepping stone)
-        # 3: potential core
-        # 4: potential core (core overlapping stepping stone)
-        # 6: potential core (core overlapping core)
-
         mode_bands = [
-            "size",
             "range",
             "country",
             "ecoregion",
@@ -324,7 +316,6 @@ class SCLEffectivePotentialHabitat(SCLTask):
             eco_country.updateMask(allpotential)
             .addBands(
                 [
-                    allpotential,
                     range_class,
                     country_image,
                     ecoregion_image,
