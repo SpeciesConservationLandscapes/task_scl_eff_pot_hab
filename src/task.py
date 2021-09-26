@@ -243,7 +243,6 @@ class SCLEffectivePotentialHabitat(SCLTask):
                 min_core_pixels,
                 max_core_pixels,
             )
-            .updateMask(potential_habitat)
         )
         min_stepping_stone_size = (
             min_patch_size.multiply(self.density_values["core_to_step_ratio"])
@@ -252,7 +251,6 @@ class SCLEffectivePotentialHabitat(SCLTask):
                 min_step_pixels,
                 max_step_pixels,
             )
-            .updateMask(potential_habitat)
         )
 
         connectivity_distance = self.thresholds["dispersal_distance"] / 2
