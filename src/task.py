@@ -337,8 +337,9 @@ class SCLEffectivePotentialHabitat(SCLTask):
             tileScale=8,
         )
 
-        self.export_fc_ee(scl_polys, "pothab/scl_polys")
         self.export_image_ee(eff_pot_hab_export, "pothab/potential_habitat")
+        self.export_fc_ee(scl_polys, "pothab/scl_polys")
+        self.export_image_ee(scl_image, "pothab/scl_image")
 
     def check_inputs(self):
         super().check_inputs()
