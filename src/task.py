@@ -85,11 +85,11 @@ class SCLEffectivePotentialHabitat(SCLTask):
             self.inputs["historical_range"]["ee_path"]
         )
         self.historical_range = _historical_range.reduceToImage(
-            ["TCL_histor"], ee.Reducer.first()
+            ["FID"], ee.Reducer.first()
         ).unmask(0)
         self.extirpated_range = (
             ee.FeatureCollection(self.inputs["extirpated_range"]["ee_path"])
-            .reduceToImage(["TCL_extirp"], ee.Reducer.first())
+            .reduceToImage(["FID"], ee.Reducer.first())
             .unmask(0)
         )
 
@@ -113,7 +113,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
         return f"{self.speciesdir}/extirpated_range"
 
     def density_path(self):
-        return f"{self.speciesdir}/biome_density/biome_density_2021-09-14"
+        return f"{self.speciesdir}/biome_density/biome_density_2021-10-26"
 
     def zones_path(self):
         return f"{self.speciesdir}/zones"
