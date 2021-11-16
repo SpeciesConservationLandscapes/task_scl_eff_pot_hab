@@ -47,6 +47,11 @@ class SCLEffectivePotentialHabitat(SCLTask):
             "ee_path": "projects/HII/v1/hii",
             "maxage": 1,
         },
+        "pas": {
+            "ee_type": SCLTask.FEATURECOLLECTION,
+            "ee_path": "WCMC/WDPA/current/polygons",
+            "maxage": 1,
+        },
         "watermask": {
             "ee_type": SCLTask.IMAGE,
             "ee_path": "projects/HII/v1/source/phys/watermask_jrc70_cciocean",
@@ -102,6 +107,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
         self.density = ee.FeatureCollection(self.inputs["density"]["ee_path"])
         self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
         self.zones = ee.FeatureCollection(self.inputs["zones"]["ee_path"])
+        self.pas = ee.FeatureCollection(self.inputs["pas"]["ee_path"])
 
     def structural_habitat_path(self):
         return f"{self.ee_rootdir}/structural_habitat"
@@ -231,6 +237,9 @@ class SCLEffectivePotentialHabitat(SCLTask):
         ecoregion_image = self.ecoregions.reduceToImage(
             properties=["ECO_ID"], reducer=ee.Reducer.mode()
         )
+        biome_image = self.ecoregions.reduceToImage(
+            properties=["BIOME_NUM"], reducer=ee.Reducer.mode()
+        )
         eco_country = country_image.multiply(1000).add(ecoregion_image)
         density = self.density.map(self.density_to_patch_size)
         ecoregion_id = density.aggregate_array("ECO_ID")
@@ -293,14 +302,25 @@ class SCLEffectivePotentialHabitat(SCLTask):
             .where(self.extirpated_range.eq(1), ee.Image(1))
         ).selfMask()
 
+        def _pa_boolean(feat):
+            return feat.set("protected", 1)
+
+        paimage = (
+            self.pas.map(_pa_boolean)
+            .reduceToImage(["protected"], ee.Reducer.first())
+            .rename("protected")
+        )
+
         area = ee.Image.pixelArea().divide(1000000).updateMask(self.watermask)
         eff_pot_hab_area = area.updateMask(eff_pot_hab)
         potential_habitat_area = area.updateMask(potential_habitat)
+        pa_area = area.updateMask(paimage)
 
         mode_bands = [
             "range",
             "country",
             "ecoregion",
+            "biome",
             "min_patch_size",
             "min_stepping_stone_size",
         ]
@@ -308,6 +328,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
             "polygon_area",
             "eff_pot_hab_area",
             "connected_eff_pot_hab_area",
+            "pa_area",
         ]
 
         scl_image = (
@@ -317,11 +338,13 @@ class SCLEffectivePotentialHabitat(SCLTask):
                     range_class,
                     country_image,
                     ecoregion_image,
+                    biome_image,
                     min_patch_size,
                     min_stepping_stone_size,
                     area,
                     eff_pot_hab_area,
                     potential_habitat_area,
+                    pa_area,
                 ]
             )
             .rename(["scl_poly"] + mode_bands + sum_bands)
@@ -337,9 +360,26 @@ class SCLEffectivePotentialHabitat(SCLTask):
             tileScale=8,
         )
 
-        self.export_image_ee(eff_pot_hab_export, "pothab/potential_habitat")
-        self.export_fc_ee(scl_polys, "pothab/scl_polys")
-        self.export_image_ee(scl_image, "pothab/scl_image")
+        def _attribute(item):
+            item = ee.List(item)
+            feature = ee.Feature(item.get(0))
+            poly_id = item.get(1)
+
+            pa_proportion = ee.Number(feature.get("pa_area")).divide(
+                ee.Number(feature.get("polygon_area"))
+            )
+
+            return feature.set({"poly_id": poly_id, "pa_area": pa_proportion})
+
+        ids = ee.List.sequence(1, scl_polys.size())
+        scl_poly_list = ee.List(scl_polys.toList(scl_polys.size()))
+        scl_polys_assigned = ee.FeatureCollection(
+            scl_poly_list.zip(ids).map(_attribute)
+        )
+
+        # self.export_image_ee(eff_pot_hab_export, "pothab/potential_habitat")
+        self.export_fc_ee(scl_polys_assigned, "pothab/scl_polys")
+        # self.export_image_ee(scl_image, "pothab/scl_image")
 
     def check_inputs(self):
         super().check_inputs()
