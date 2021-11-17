@@ -86,10 +86,10 @@ class SCLEffectivePotentialHabitat(SCLTask):
             ee.ImageCollection(self.inputs["hii"]["ee_path"])
         )
 
-        _historical_range = ee.FeatureCollection(
+        self.historical_range_fc = ee.FeatureCollection(
             self.inputs["historical_range"]["ee_path"]
         )
-        self.historical_range = _historical_range.reduceToImage(
+        self.historical_range = self.historical_range_fc.reduceToImage(
             ["FID"], ee.Reducer.first()
         ).unmask(0)
         self.extirpated_range = (
@@ -100,14 +100,20 @@ class SCLEffectivePotentialHabitat(SCLTask):
 
         self.countries = ee.FeatureCollection(
             self.inputs["countries"]["ee_path"]
-        ).filterBounds(_historical_range.geometry())
+        ).filterBounds(self.historical_range_fc.geometry())
         self.ecoregions = ee.FeatureCollection(
             self.inputs["ecoregions"]["ee_path"]
-        ).filterBounds(_historical_range.geometry())
+        ).filterBounds(self.historical_range_fc.geometry())
         self.density = ee.FeatureCollection(self.inputs["density"]["ee_path"])
         self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
         self.zones = ee.FeatureCollection(self.inputs["zones"]["ee_path"])
-        self.pas = ee.FeatureCollection(self.inputs["pas"]["ee_path"])
+        taskyear = ee.Date(self.taskdate.strftime(self.DATE_FORMAT)).get("year")
+        self.pas = (
+            ee.FeatureCollection(self.inputs["pas"]["ee_path"])
+            .filterBounds(self.historical_range_fc.geometry())
+            .filter(ee.Filter.neq("STATUS", "Proposed"))
+            .filter(ee.Filter.lte("STATUS_YR", taskyear))
+        )
 
     def structural_habitat_path(self):
         return f"{self.ee_rootdir}/structural_habitat"
@@ -302,14 +308,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
             .where(self.extirpated_range.eq(1), ee.Image(1))
         ).selfMask()
 
-        def _pa_boolean(feat):
-            return feat.set("protected", 1)
-
-        paimage = (
-            self.pas.map(_pa_boolean)
-            .reduceToImage(["protected"], ee.Reducer.first())
-            .rename("protected")
-        )
+        paimage = self.pas.reduceToImage(["WDPAID"], ee.Reducer.first())
 
         area = ee.Image.pixelArea().divide(1000000).updateMask(self.watermask)
         eff_pot_hab_area = area.updateMask(eff_pot_hab)
@@ -358,7 +357,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
             crs=self.crs,
             maxPixels=self.ee_max_pixels,
             tileScale=8,
-        )
+        ).filter(ee.Filter.gt("eff_pot_hab_area", 0))
 
         def _attribute(item):
             item = ee.List(item)
@@ -369,7 +368,11 @@ class SCLEffectivePotentialHabitat(SCLTask):
                 ee.Number(feature.get("polygon_area"))
             )
 
-            return feature.set({"poly_id": poly_id, "pa_area": pa_proportion})
+            feature = feature.set({"poly_id": poly_id, "pa_proportion": pa_proportion})
+            return_properties = feature.propertyNames().filter(
+                ee.Filter.neq("item", "pa_area")
+            )
+            return feature.select(return_properties)
 
         ids = ee.List.sequence(1, scl_polys.size())
         scl_poly_list = ee.List(scl_polys.toList(scl_polys.size()))
@@ -377,9 +380,9 @@ class SCLEffectivePotentialHabitat(SCLTask):
             scl_poly_list.zip(ids).map(_attribute)
         )
 
-        # self.export_image_ee(eff_pot_hab_export, "pothab/potential_habitat")
+        self.export_image_ee(eff_pot_hab_export, "pothab/potential_habitat")
         self.export_fc_ee(scl_polys_assigned, "pothab/scl_polys")
-        # self.export_image_ee(scl_image, "pothab/scl_image")
+        self.export_image_ee(scl_image, "pothab/scl_image")
 
     def check_inputs(self):
         super().check_inputs()
