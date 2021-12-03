@@ -122,7 +122,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
         return f"{self.speciesdir}/historical_range"
 
     def extirpated_range_path(self):
-        return f"{self.speciesdir}/extirpated_range"
+        return f"{self.speciesdir}/extirpated_range_{self.taskdate.year}"
 
     def density_path(self):
         return f"{self.speciesdir}/biome_density/biome_density_2021-10-26"
