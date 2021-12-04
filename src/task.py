@@ -362,7 +362,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
         def _attribute(item):
             item = ee.List(item)
             feature = ee.Feature(item.get(0))
-            poly_id = item.get(1).int()
+            poly_id = ee.Number(item.get(1)).int()
 
             pa_proportion = ee.Number(feature.get("pa_area")).divide(
                 ee.Number(feature.get("polygon_area"))
