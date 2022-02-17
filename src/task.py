@@ -12,11 +12,6 @@ class SCLEffectivePotentialHabitat(SCLTask):
             "ee_path": "structural_habitat_path",
             "maxage": 1,
         },
-        "historical_range": {
-            "ee_type": SCLTask.IMAGE,
-            "ee_path": "historical_range_path",
-            "static": True,
-        },
         "extirpated_range": {
             "ee_type": SCLTask.IMAGE,
             "ee_path": "extirpated_range_path",
@@ -32,30 +27,10 @@ class SCLEffectivePotentialHabitat(SCLTask):
             "ee_path": "zones_path",
             "static": True,
         },
-        "countries": {
-            "ee_type": SCLTask.FEATURECOLLECTION,
-            "ee_path": "USDOS/LSIB/2017",
-            "static": True,
-        },
-        "ecoregions": {
-            "ee_type": SCLTask.FEATURECOLLECTION,
-            "ee_path": "RESOLVE/ECOREGIONS/2017",
-            "static": True,
-        },
         "hii": {
             "ee_type": SCLTask.IMAGECOLLECTION,
             "ee_path": "projects/HII/v1/hii",
             "maxage": 1,
-        },
-        "pas": {
-            "ee_type": SCLTask.FEATURECOLLECTION,
-            "ee_path": "WCMC/WDPA/current/polygons",
-            "maxage": 1,
-        },
-        "watermask": {
-            "ee_type": SCLTask.IMAGE,
-            "ee_path": "projects/HII/v1/source/phys/watermask_jrc70_cciocean",
-            "static": True,
         },
     }
     thresholds = {
@@ -85,41 +60,16 @@ class SCLEffectivePotentialHabitat(SCLTask):
         self.hii, _ = self.get_most_recent_image(
             ee.ImageCollection(self.inputs["hii"]["ee_path"])
         )
-
-        self.historical_range_fc = ee.FeatureCollection(
-            self.inputs["historical_range"]["ee_path"]
-        )
-        self.historical_range = self.historical_range_fc.reduceToImage(
-            ["FID"], ee.Reducer.first()
-        ).unmask(0)
         self.extirpated_range = (
             ee.FeatureCollection(self.inputs["extirpated_range"]["ee_path"])
             .reduceToImage(["FID"], ee.Reducer.first())
             .unmask(0)
         )
-
-        self.countries = ee.FeatureCollection(
-            self.inputs["countries"]["ee_path"]
-        ).filterBounds(self.historical_range_fc.geometry())
-        self.ecoregions = ee.FeatureCollection(
-            self.inputs["ecoregions"]["ee_path"]
-        ).filterBounds(self.historical_range_fc.geometry())
         self.density = ee.FeatureCollection(self.inputs["density"]["ee_path"])
-        self.watermask = ee.Image(self.inputs["watermask"]["ee_path"])
         self.zones = ee.FeatureCollection(self.inputs["zones"]["ee_path"])
-        taskyear = ee.Date(self.taskdate.strftime(self.DATE_FORMAT)).get("year")
-        self.pas = (
-            ee.FeatureCollection(self.inputs["pas"]["ee_path"])
-            .filterBounds(self.historical_range_fc.geometry())
-            .filter(ee.Filter.neq("STATUS", "Proposed"))
-            .filter(ee.Filter.lte("STATUS_YR", taskyear))
-        )
 
     def structural_habitat_path(self):
         return f"{self.ee_rootdir}/structural_habitat"
-
-    def historical_range_path(self):
-        return f"{self.speciesdir}/historical_range"
 
     def extirpated_range_path(self):
         return f"{self.speciesdir}/extirpated_range_{self.taskdate.year}"
