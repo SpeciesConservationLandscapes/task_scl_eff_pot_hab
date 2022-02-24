@@ -188,7 +188,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
         ).selfMask()
 
         country_image = self.countries.reduceToImage(
-            properties=["OBJECTID"], reducer=ee.Reducer.mode()
+            properties=["ISONUMERIC"], reducer=ee.Reducer.mode()
         )
         ecoregion_image = self.ecoregions.reduceToImage(
             properties=["ECO_ID"], reducer=ee.Reducer.mode()
