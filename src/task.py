@@ -5,7 +5,6 @@ from task_base import SCLTask
 
 class SCLEffectivePotentialHabitat(SCLTask):
     BIOME_ZONE_LABEL = "Zone"
-    scale = 1000
     inputs = {
         "structural_habitat": {
             "ee_type": SCLTask.IMAGECOLLECTION,
@@ -38,10 +37,8 @@ class SCLEffectivePotentialHabitat(SCLTask):
         "reduce_res_input_pixels": 0.5,
         "structural_habitat_patch_size": 5,  # sq km
         "hii": {
-            "zone_1": 18,
-            "zone_2": 8,
-            "zone_3": 6,
-            "zone_4": 6,
+            2001: {"zone_1": 18, "zone_2": 8, "zone_3": 6, "zone_4": 6},
+            2020: {"zone_1": 18, "zone_2": 8, "zone_3": 6, "zone_4": 6},
         },  # TODO: possibly replace with dynamic thresholding
         "dispersal_distance": 4,
     }
@@ -142,10 +139,10 @@ class SCLEffectivePotentialHabitat(SCLTask):
         hii_threshold_image = zone_image.remap(
             [1, 2, 3, 4],
             [
-                self.thresholds["hii"]["zone_1"],
-                self.thresholds["hii"]["zone_2"],
-                self.thresholds["hii"]["zone_3"],
-                self.thresholds["hii"]["zone_4"],
+                self.thresholds["hii"][self.taskdate.year]["zone_1"],
+                self.thresholds["hii"][self.taskdate.year]["zone_2"],
+                self.thresholds["hii"][self.taskdate.year]["zone_3"],
+                self.thresholds["hii"][self.taskdate.year]["zone_4"],
             ],
         )
         low_hii_mask = self.hii.divide(100).lte(hii_threshold_image).selfMask()
