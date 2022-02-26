@@ -37,8 +37,8 @@ class SCLEffectivePotentialHabitat(SCLTask):
         "reduce_res_input_pixels": 0.5,
         "structural_habitat_patch_size": 5,  # sq km
         "hii": {
-            2001: {"zone_1": 18, "zone_2": 8, "zone_3": 6, "zone_4": 6},
-            2020: {"zone_1": 18, "zone_2": 8, "zone_3": 6, "zone_4": 6},
+            2001: {"zone_1": 16, "zone_2": 8, "zone_3": 6, "zone_4": 6},
+            2020: {"zone_1": 16, "zone_2": 9, "zone_3": 5, "zone_4": 5},
         },  # TODO: possibly replace with dynamic thresholding
         "dispersal_distance": 4,
     }
