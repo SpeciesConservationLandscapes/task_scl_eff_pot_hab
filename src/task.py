@@ -77,6 +77,12 @@ class SCLEffectivePotentialHabitat(SCLTask):
         )
         self.extirpated_range = (
             ee.FeatureCollection(self.inputs["extirpated_range"]["ee_path"])
+            .filter(
+                ee.Filter.And(
+                    ee.Filter.lte("ext_year", self.taskdate.year),
+                    ee.Filter.gt("ext_revert", self.taskdate.year),
+                )
+            )
             .reduceToImage(["diss"], ee.Reducer.first())
             .unmask(0)
         )
@@ -87,7 +93,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
         return f"{self.ee_rootdir}/structural_habitat"
 
     def extirpated_range_path(self):
-        return f"{self.speciesdir}/extirpated_range_{self.taskdate.year}"
+        return f"{self.speciesdir}/extirpated_range"
 
     def density_path(self):
         return f"{self.speciesdir}/biome_density/biome_density_2021-10-26"
