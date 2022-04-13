@@ -36,28 +36,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
         "structural_habitat": 0.5,
         "reduce_res_input_pixels": 0.5,
         "structural_habitat_patch_size": 5,  # sq km
-        "hii": {
-            2001: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2002: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2003: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2004: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2005: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2006: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2007: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2008: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2009: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2010: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2011: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2012: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2013: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2014: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2015: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2016: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2017: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2018: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2019: {"zone_1": 14, "zone_2": 7, "zone_3": 7, "zone_4": 7},
-            2020: {"zone_1": 16, "zone_2": 9, "zone_3": 5, "zone_4": 5},
-        },  # TODO: possibly replace with dynamic thresholding
+        "hii": {"zone_1": 14.4, "zone_2": 7.2, "zone_3": 4.9, "zone_4": 4.9},
         "dispersal_distance": 4,
     }
     density_values = {
@@ -163,10 +142,10 @@ class SCLEffectivePotentialHabitat(SCLTask):
         hii_threshold_image = zone_image.remap(
             [1, 2, 3, 4],
             [
-                self.thresholds["hii"][self.taskdate.year]["zone_1"],
-                self.thresholds["hii"][self.taskdate.year]["zone_2"],
-                self.thresholds["hii"][self.taskdate.year]["zone_3"],
-                self.thresholds["hii"][self.taskdate.year]["zone_4"],
+                self.thresholds["hii"]["zone_1"],
+                self.thresholds["hii"]["zone_2"],
+                self.thresholds["hii"]["zone_3"],
+                self.thresholds["hii"]["zone_4"],
             ],
         )
         low_hii_mask = self.hii.divide(100).lte(hii_threshold_image).selfMask()
