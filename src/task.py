@@ -11,11 +11,6 @@ class SCLEffectivePotentialHabitat(SCLTask):
             "ee_path": "structural_habitat_path",
             "maxage": 1,
         },
-        "extirpated_range": {
-            "ee_type": SCLTask.IMAGE,
-            "ee_path": "extirpated_range_path",
-            "static": True,
-        },
         "density": {
             "ee_type": SCLTask.FEATURECOLLECTION,
             "ee_path": "density_path",
@@ -55,8 +50,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
             ee.ImageCollection(self.inputs["hii"]["ee_path"])
         )
         self.extirpated_range = (
-            ee.FeatureCollection(self.inputs["extirpated_range"]["ee_path"])
-            .filter(
+            self.historical_range_fc.filter(
                 ee.Filter.And(
                     ee.Filter.lte("ext_year", self.taskdate.year),
                     ee.Filter.gt("ext_revert", self.taskdate.year),
