@@ -26,6 +26,11 @@ class SCLEffectivePotentialHabitat(SCLTask):
             "ee_path": "projects/HII/v1/hii",
             "maxage": 1,
         },
+        "states": {
+            "ee_type": SCLTask.FEATURECOLLECTION,
+            "ee_path": "projects/SCL/v1/source/gadm404_state_simp",
+            "static": True,
+        },
     }
     thresholds = {
         "structural_habitat": 0.5,
@@ -61,6 +66,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
         )
         self.density = ee.FeatureCollection(self.inputs["density"]["ee_path"])
         self.zones = ee.FeatureCollection(self.inputs["zones"]["ee_path"])
+        self.states = ee.FeatureCollection(self.inputs["states"]["ee_path"])
 
     def structural_habitat_path(self):
         return f"{self.ee_rootdir}/structural_habitat"
@@ -181,8 +187,11 @@ class SCLEffectivePotentialHabitat(SCLTask):
             connected_potential_habitat.gte(min_step_pixels)
         ).selfMask()
 
-        country_image = self.countries.reduceToImage(
-            properties=["ISONUMERIC"], reducer=ee.Reducer.mode()
+        country_image = self.states.reduceToImage(
+            properties=["isonumeric"], reducer=ee.Reducer.mode()
+        )
+        state_image = self.states.reduceToImage(
+            properties=["gadm1code"], reducer=ee.Reducer.mode()
         )
         ecoregion_image = self.ecoregions.reduceToImage(
             properties=["ECO_ID"], reducer=ee.Reducer.mode()
@@ -190,7 +199,6 @@ class SCLEffectivePotentialHabitat(SCLTask):
         biome_image = self.ecoregions.reduceToImage(
             properties=["BIOME_NUM"], reducer=ee.Reducer.mode()
         )
-        eco_country = country_image.multiply(1000).add(ecoregion_image)
         density = self.density.map(self.density_to_patch_size)
         ecoregion_id = density.aggregate_array("ECO_ID")
         core_size = density.aggregate_array("min_core_size")
@@ -262,6 +270,7 @@ class SCLEffectivePotentialHabitat(SCLTask):
         mode_bands = [
             "range",
             "country",
+            "state",
             "ecoregion",
             "biome",
             "min_patch_size",
@@ -275,11 +284,12 @@ class SCLEffectivePotentialHabitat(SCLTask):
         ]
 
         scl_image = (
-            eco_country.updateMask(allpotential)
+            state_image.updateMask(allpotential)
             .addBands(
                 [
                     range_class,
                     country_image,
+                    state_image,
                     ecoregion_image,
                     biome_image,
                     min_patch_size,
